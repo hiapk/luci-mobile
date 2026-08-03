@@ -254,11 +254,10 @@ class _RouterDiagnosticsScreenState
                 _DiagnosticOperation.traceroute: Text('路由追踪'),
                 _DiagnosticOperation.nslookup: Text('DNS 查询'),
               },
-              onValueChanged: _running
-                  ? null
-                  : (value) {
-                      if (value != null) setState(() => _operation = value);
-                    },
+              onValueChanged: (value) {
+                if (_running || value == null) return;
+                setState(() => _operation = value);
+              },
             ),
             const SizedBox(height: 16),
             CupertinoButton.filled(
