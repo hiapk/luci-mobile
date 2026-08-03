@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:luci_mobile/main.dart';
@@ -35,6 +35,8 @@ class _LuciWebViewScreenState extends ConsumerState<LuciWebViewScreen> {
   late String _token;
   int _progress = 0;
   String? _loadError;
+  bool _canGoBack = false;
+  bool _canGoForward = false;
   bool _handlingSessionExpiry = false;
 
   @override
@@ -50,15 +52,15 @@ class _LuciWebViewScreenState extends ConsumerState<LuciWebViewScreen> {
             if (mounted) setState(() => _progress = progress);
           },
           onPageStarted: (_) {
-            if (mounted) {
-              setState(() {
-                _loadError = null;
-                _progress = 0;
-              });
-            }
+            if (!mounted) return;
+            setState(() {
+              _loadError = null;
+              _progress = 0;
+            });
           },
           onPageFinished: (url) {
             if (mounted) setState(() => _progress = 100);
+            unawaited(_updateNavigationState());
             final uri = Uri.tryParse(url);
             if (uri != null && _isLoginPage(uri)) {
               unawaited(_renewSession());
@@ -76,8 +78,12 @@ class _LuciWebViewScreenState extends ConsumerState<LuciWebViewScreen> {
   }
 
   Future<void> _loadTarget() async {
-    await _setSessionCookie();
-    await _controller.loadRequest(widget.targetUri);
+    try {
+      await _setSessionCookie();
+      await _controller.loadRequest(widget.targetUri);
+    } catch (error) {
+      if (mounted) setState(() => _loadError = error.toString());
+    }
   }
 
   Future<void> _setSessionCookie() {
@@ -119,6 +125,18 @@ class _LuciWebViewScreenState extends ConsumerState<LuciWebViewScreen> {
         (uri.path == '/cgi-bin/luci' || uri.path == '/cgi-bin/luci/');
   }
 
+  Future<void> _updateNavigationState() async {
+    final states = await Future.wait([
+      _controller.canGoBack(),
+      _controller.canGoForward(),
+    ]);
+    if (!mounted) return;
+    setState(() {
+      _canGoBack = states[0];
+      _canGoForward = states[1];
+    });
+  }
+
   Future<void> _renewSession() async {
     if (_handlingSessionExpiry || !mounted) return;
     _handlingSessionExpiry = true;
@@ -153,43 +171,44 @@ class _LuciWebViewScreenState extends ConsumerState<LuciWebViewScreen> {
         return;
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(appState.errorMessage ?? '重新登录失败，请重试。')),
-      );
+      await _showLoginError(appState.errorMessage ?? '重新登录失败，请重试。');
     }
   }
 
   Future<String?> _askForOtp() async {
     final controller = TextEditingController();
     try {
-      return await showDialog<String>(
+      return await showCupertinoDialog<String>(
         context: context,
         barrierDismissible: false,
         builder: (dialogContext) => StatefulBuilder(
-          builder: (context, setDialogState) => AlertDialog(
+          builder: (context, setDialogState) => CupertinoAlertDialog(
             title: const Text('会话已过期'),
-            content: TextField(
-              controller: controller,
-              autofocus: true,
-              keyboardType: TextInputType.number,
-              maxLength: 6,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              decoration: const InputDecoration(
-                labelText: '两步验证码',
-                hintText: '请输入 6 位验证码',
-                border: OutlineInputBorder(),
+            content: Padding(
+              padding: const EdgeInsets.only(top: 14),
+              child: CupertinoTextField(
+                controller: controller,
+                autofocus: true,
+                keyboardType: TextInputType.number,
+                maxLength: 6,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                placeholder: '6 位两步验证码',
+                textAlign: TextAlign.center,
+                onChanged: (_) => setDialogState(() {}),
+                onSubmitted: (value) {
+                  if (value.length == 6) {
+                    Navigator.of(dialogContext).pop(value);
+                  }
+                },
               ),
-              onChanged: (_) => setDialogState(() {}),
-              onSubmitted: (value) {
-                if (value.length == 6) Navigator.of(dialogContext).pop(value);
-              },
             ),
             actions: [
-              TextButton(
+              CupertinoDialogAction(
                 onPressed: () => Navigator.of(dialogContext).pop(),
                 child: const Text('取消'),
               ),
-              FilledButton(
+              CupertinoDialogAction(
+                isDefaultAction: true,
                 onPressed: controller.text.length == 6
                     ? () => Navigator.of(dialogContext).pop(controller.text)
                     : null,
@@ -204,74 +223,166 @@ class _LuciWebViewScreenState extends ConsumerState<LuciWebViewScreen> {
     }
   }
 
-  Future<void> _goBack() async {
-    if (await _controller.canGoBack()) {
-      await _controller.goBack();
-    } else if (mounted) {
-      Navigator.of(context).pop();
+  Future<void> _showLoginError(String message) {
+    return showCupertinoDialog<void>(
+      context: context,
+      builder: (dialogContext) => CupertinoAlertDialog(
+        title: const Text('登录失败'),
+        content: Text(message),
+        actions: [
+          CupertinoDialogAction(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('好'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openExternally() async {
+    final currentUrl = await _controller.currentUrl();
+    final uri = currentUrl == null ? null : Uri.tryParse(currentUrl);
+    if (uri != null) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-          onPressed: _goBack,
-          icon: const Icon(Icons.arrow_back_ios_new_rounded),
-          tooltip: '返回',
+    final separator = CupertinoColors.separator.resolveFrom(context);
+    final toolbarBackground = CupertinoColors.systemBackground.resolveFrom(
+      context,
+    );
+    return CupertinoPageScaffold(
+      navigationBar: CupertinoNavigationBar(
+        previousPageTitle: 'LuCI',
+        middle: Text(
+          widget.title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
         ),
-        title: Text(widget.title),
-        actions: [
-          IconButton(
-            onPressed: () => _controller.goForward(),
-            icon: const Icon(Icons.arrow_forward_ios_rounded),
-            tooltip: '前进',
-          ),
-          IconButton(
-            onPressed: () => _controller.reload(),
-            icon: const Icon(Icons.refresh_rounded),
-            tooltip: '刷新',
-          ),
-        ],
+        trailing: _progress < 100
+            ? const CupertinoActivityIndicator(radius: 9)
+            : CupertinoButton(
+                padding: EdgeInsets.zero,
+                onPressed: () => _controller.reload(),
+                child: const Icon(CupertinoIcons.refresh, size: 21),
+              ),
       ),
-      body: Column(
-        children: [
-          if (_progress < 100)
-            LinearProgressIndicator(
-              value: _progress == 0 ? null : _progress / 100,
-            ),
-          Expanded(
-            child: Stack(
-              children: [
-                WebViewWidget(controller: _controller),
-                if (_loadError != null)
-                  ColoredBox(
-                    color: Theme.of(context).colorScheme.surface,
-                    child: Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(24),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.error_outline_rounded, size: 48),
-                            const SizedBox(height: 16),
-                            Text(_loadError!, textAlign: TextAlign.center),
-                            const SizedBox(height: 16),
-                            FilledButton.icon(
-                              onPressed: () => _controller.reload(),
-                              icon: const Icon(Icons.refresh_rounded),
-                              label: const Text('重试'),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          children: [
+            if (_progress > 0 && _progress < 100)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: FractionallySizedBox(
+                  widthFactor: _progress / 100,
+                  child: const ColoredBox(
+                    color: CupertinoColors.activeBlue,
+                    child: SizedBox(height: 2),
+                  ),
+                ),
+              ),
+            Expanded(
+              child: Stack(
+                children: [
+                  WebViewWidget(controller: _controller),
+                  if (_loadError != null)
+                    Positioned.fill(
+                      child: ColoredBox(
+                        color: CupertinoColors.systemBackground.resolveFrom(
+                          context,
+                        ),
+                        child: Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(28),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  CupertinoIcons.exclamationmark_circle,
+                                  size: 44,
+                                  color: CupertinoColors.systemRed,
+                                ),
+                                const SizedBox(height: 14),
+                                Text(_loadError!, textAlign: TextAlign.center),
+                                const SizedBox(height: 18),
+                                CupertinoButton.filled(
+                                  onPressed: _loadTarget,
+                                  child: const Text('重新加载'),
+                                ),
+                              ],
                             ),
-                          ],
+                          ),
                         ),
                       ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: toolbarBackground,
+                border: Border(top: BorderSide(color: separator, width: 0.5)),
+              ),
+              child: SizedBox(
+                height: 46,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    _WebToolbarButton(
+                      label: '后退',
+                      icon: CupertinoIcons.chevron_back,
+                      onPressed: _canGoBack ? _controller.goBack : null,
+                    ),
+                    _WebToolbarButton(
+                      label: '前进',
+                      icon: CupertinoIcons.chevron_forward,
+                      onPressed: _canGoForward ? _controller.goForward : null,
+                    ),
+                    _WebToolbarButton(
+                      label: '刷新',
+                      icon: CupertinoIcons.refresh,
+                      onPressed: _controller.reload,
+                    ),
+                    _WebToolbarButton(
+                      label: '在浏览器中打开',
+                      icon: CupertinoIcons.arrow_up_right_square,
+                      onPressed: _openExternally,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _WebToolbarButton extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final VoidCallback? onPressed;
+
+  const _WebToolbarButton({
+    required this.label,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: label,
+      button: true,
+      enabled: onPressed != null,
+      child: CupertinoButton(
+        padding: const EdgeInsets.symmetric(horizontal: 18),
+        onPressed: onPressed,
+        child: Icon(icon, size: 22),
       ),
     );
   }

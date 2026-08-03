@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:luci_mobile/screens/dashboard_screen.dart';
 import 'package:luci_mobile/screens/clients_screen.dart';
@@ -5,7 +6,6 @@ import 'package:luci_mobile/screens/interfaces_screen.dart';
 import 'package:luci_mobile/screens/luci_menu_screen.dart';
 import 'package:luci_mobile/screens/more_screen.dart';
 import 'package:luci_mobile/main.dart';
-import 'package:luci_mobile/widgets/luci_navigation_enhancements.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 class MainScreen extends ConsumerStatefulWidget {
@@ -100,81 +100,51 @@ class _MainScreenState extends ConsumerState<MainScreen> {
       });
     }
     return Scaffold(
-      body: Center(
-        child: LuciTabTransition(
-          transitionKey: 'tab_$_selectedIndex',
-          child: _widgetOptions.elementAt(_selectedIndex),
-        ),
-      ),
+      body: IndexedStack(index: _selectedIndex, children: _widgetOptions),
       bottomNavigationBar: Builder(
         builder: (context) {
           final isRebooting = ref.watch(
             appStateProvider.select((state) => state.isRebooting),
           );
-          Color? getTabColor(int index) =>
-              (isRebooting && index != 4) ? Colors.grey.withAlpha(128) : null;
           double getTabOpacity(int index) =>
               (isRebooting && index != 4) ? 0.5 : 1.0;
-          return NavigationBar(
-            onDestinationSelected: (index) {
+          Widget tabIcon(IconData icon, int index) =>
+              Opacity(opacity: getTabOpacity(index), child: Icon(icon));
+          return CupertinoTabBar(
+            currentIndex: _selectedIndex,
+            onTap: (index) {
               if (isRebooting && index != 4) return; // Only allow 'More' tab
               _onItemTapped(index);
             },
-            selectedIndex: _selectedIndex,
-            destinations: [
-              NavigationDestination(
-                selectedIcon: Opacity(
-                  opacity: getTabOpacity(0),
-                  child: Icon(Icons.dashboard, color: getTabColor(0)),
-                ),
-                icon: Opacity(
-                  opacity: getTabOpacity(0),
-                  child: Icon(Icons.dashboard_outlined, color: getTabColor(0)),
-                ),
+            activeColor: CupertinoColors.activeBlue,
+            inactiveColor: CupertinoColors.inactiveGray,
+            backgroundColor: CupertinoColors.systemBackground.resolveFrom(
+              context,
+            ),
+            items: [
+              BottomNavigationBarItem(
+                activeIcon: tabIcon(CupertinoIcons.square_grid_2x2_fill, 0),
+                icon: tabIcon(CupertinoIcons.square_grid_2x2, 0),
                 label: '概览',
               ),
-              NavigationDestination(
-                selectedIcon: Opacity(
-                  opacity: getTabOpacity(1),
-                  child: Icon(Icons.people, color: getTabColor(1)),
-                ),
-                icon: Opacity(
-                  opacity: getTabOpacity(1),
-                  child: Icon(Icons.people_outline, color: getTabColor(1)),
-                ),
+              BottomNavigationBarItem(
+                activeIcon: tabIcon(CupertinoIcons.person_2_fill, 1),
+                icon: tabIcon(CupertinoIcons.person_2, 1),
                 label: '设备',
               ),
-              NavigationDestination(
-                selectedIcon: Opacity(
-                  opacity: getTabOpacity(2),
-                  child: Icon(Icons.lan, color: getTabColor(2)),
-                ),
-                icon: Opacity(
-                  opacity: getTabOpacity(2),
-                  child: Icon(Icons.lan_outlined, color: getTabColor(2)),
-                ),
+              BottomNavigationBarItem(
+                activeIcon: tabIcon(CupertinoIcons.rectangle_3_offgrid_fill, 2),
+                icon: tabIcon(CupertinoIcons.rectangle_3_offgrid, 2),
                 label: '接口',
               ),
-              NavigationDestination(
-                selectedIcon: Opacity(
-                  opacity: getTabOpacity(3),
-                  child: Icon(Icons.web, color: getTabColor(3)),
-                ),
-                icon: Opacity(
-                  opacity: getTabOpacity(3),
-                  child: Icon(Icons.web_outlined, color: getTabColor(3)),
-                ),
+              BottomNavigationBarItem(
+                activeIcon: tabIcon(CupertinoIcons.compass_fill, 3),
+                icon: tabIcon(CupertinoIcons.compass, 3),
                 label: 'LuCI',
               ),
-              NavigationDestination(
-                selectedIcon: Opacity(
-                  opacity: getTabOpacity(4),
-                  child: Icon(Icons.more_horiz),
-                ),
-                icon: Opacity(
-                  opacity: getTabOpacity(4),
-                  child: Icon(Icons.more_horiz_outlined),
-                ),
+              BottomNavigationBarItem(
+                activeIcon: tabIcon(CupertinoIcons.ellipsis_circle_fill, 4),
+                icon: tabIcon(CupertinoIcons.ellipsis_circle, 4),
                 label: '更多',
               ),
             ],

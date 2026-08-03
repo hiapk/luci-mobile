@@ -1,11 +1,10 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:luci_mobile/main.dart';
 import 'package:luci_mobile/models/luci_menu_item.dart';
 import 'package:luci_mobile/screens/luci_webview_screen.dart';
 import 'package:luci_mobile/services/luci_menu_service.dart';
 import 'package:luci_mobile/state/app_state.dart';
-import 'package:luci_mobile/widgets/luci_app_bar.dart';
 
 class LuciMenuScreen extends ConsumerStatefulWidget {
   const LuciMenuScreen({super.key});
@@ -59,7 +58,7 @@ class _LuciMenuScreenState extends ConsumerState<LuciMenuScreen> {
       pathSegments: ['cgi-bin', 'luci', ...item.pathSegments],
     );
     await Navigator.of(context).push(
-      MaterialPageRoute<void>(
+      CupertinoPageRoute<void>(
         builder: (context) => LuciWebViewScreen(
           title: item.title,
           targetUri: uri,
@@ -99,17 +98,43 @@ class _LuciMenuScreenState extends ConsumerState<LuciMenuScreen> {
 
   IconData _iconFor(String key) {
     return switch (key) {
-      'quickstart' => Icons.home_outlined,
-      'network_guide' => Icons.assistant_navigation,
-      'status' => Icons.monitor_heart_outlined,
-      'system' => Icons.settings_outlined,
-      'store' => Icons.shopping_bag_outlined,
-      'docker' => Icons.inventory_2_outlined,
-      'services' => Icons.miscellaneous_services_outlined,
-      'network' => Icons.account_tree_outlined,
-      'vpn' => Icons.vpn_key_outlined,
-      _ => Icons.open_in_browser_outlined,
+      'quickstart' => CupertinoIcons.house_fill,
+      'network_guide' => CupertinoIcons.map_fill,
+      'status' => CupertinoIcons.chart_bar_fill,
+      'system' => CupertinoIcons.gear_alt_fill,
+      'store' => CupertinoIcons.bag_fill,
+      'docker' => CupertinoIcons.cube_box_fill,
+      'services' => CupertinoIcons.slider_horizontal_3,
+      'network' => CupertinoIcons.rectangle_3_offgrid_fill,
+      'vpn' => CupertinoIcons.lock_shield_fill,
+      _ => CupertinoIcons.compass_fill,
     };
+  }
+
+  Color _colorFor(String key) {
+    return switch (key) {
+      'quickstart' => CupertinoColors.systemTeal,
+      'network_guide' => CupertinoColors.systemOrange,
+      'status' => CupertinoColors.systemIndigo,
+      'system' => CupertinoColors.systemRed,
+      'store' => CupertinoColors.systemPurple,
+      'docker' => CupertinoColors.activeBlue,
+      'services' => CupertinoColors.systemGreen,
+      'network' => CupertinoColors.systemBlue,
+      'vpn' => CupertinoColors.systemGrey,
+      _ => CupertinoColors.systemBlue,
+    };
+  }
+
+  void _openSubmenu(AppState appState, LuciMenuItem item) {
+    Navigator.of(context).push(
+      CupertinoPageRoute<void>(
+        builder: (context) => _LuciSubmenuScreen(
+          item: item,
+          onOpenItem: (child) => _openItem(appState, child),
+        ),
+      ),
+    );
   }
 
   @override
@@ -122,103 +147,187 @@ class _LuciMenuScreenState extends ConsumerState<LuciMenuScreen> {
       _menuFuture = _fetchMenu(appState);
     }
 
-    return Scaffold(
-      appBar: LuciAppBar(
-        title: 'LuCI 管理',
-        actions: [
-          IconButton(
-            onPressed: () => _refresh(appState),
-            icon: const Icon(Icons.refresh_rounded),
-            tooltip: '刷新菜单',
-          ),
-        ],
+    return CupertinoPageScaffold(
+      backgroundColor: CupertinoColors.systemGroupedBackground.resolveFrom(
+        context,
       ),
-      body: FutureBuilder<List<LuciMenuItem>>(
-        future: _menuFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting &&
-              !snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            return LuciErrorDisplay(
-              title: '菜单加载失败',
-              message: snapshot.error.toString(),
-              onAction: () => _refresh(appState),
-            );
-          }
+      navigationBar: CupertinoNavigationBar(
+        middle: const Text('LuCI 管理'),
+        trailing: CupertinoButton(
+          padding: EdgeInsets.zero,
+          onPressed: () => _refresh(appState),
+          child: const Icon(CupertinoIcons.refresh, size: 21),
+        ),
+      ),
+      child: SafeArea(
+        child: FutureBuilder<List<LuciMenuItem>>(
+          future: _menuFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting &&
+                !snapshot.hasData) {
+              return const Center(child: CupertinoActivityIndicator());
+            }
+            if (snapshot.hasError) {
+              return _NativeMenuError(
+                message: snapshot.error.toString(),
+                onRetry: () => _refresh(appState),
+              );
+            }
 
-          final items = _filterMenu(snapshot.data ?? const []);
-          return RefreshIndicator(
-            onRefresh: () async {
-              _refresh(appState);
-              await _menuFuture;
-            },
-            child: ListView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
+            final items = _filterMenu(snapshot.data ?? const []);
+            return ListView(
+              padding: const EdgeInsets.only(top: 12, bottom: 24),
               children: [
-                TextField(
-                  controller: _searchController,
-                  onChanged: (value) => setState(() => _query = value),
-                  decoration: InputDecoration(
-                    hintText: '搜索菜单',
-                    prefixIcon: const Icon(Icons.search_rounded),
-                    suffixIcon: _query.isEmpty
-                        ? null
-                        : IconButton(
-                            onPressed: () {
-                              _searchController.clear();
-                              setState(() => _query = '');
-                            },
-                            icon: const Icon(Icons.clear_rounded),
-                            tooltip: '清除',
-                          ),
-                    border: const OutlineInputBorder(),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: CupertinoSearchTextField(
+                    controller: _searchController,
+                    onChanged: (value) => setState(() => _query = value),
+                    onSuffixTap: () {
+                      _searchController.clear();
+                      setState(() => _query = '');
+                    },
+                    placeholder: '搜索菜单',
                   ),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 18),
                 if (items.isEmpty)
                   const Padding(
                     padding: EdgeInsets.symmetric(vertical: 64),
                     child: Center(child: Text('没有匹配的菜单')),
-                  ),
-                ...items.map((item) {
-                  if (item.children.isEmpty) {
-                    return ListTile(
-                      leading: Icon(_iconFor(item.key)),
-                      title: Text(item.title),
-                      trailing: const Icon(Icons.open_in_new_rounded, size: 20),
-                      onTap: () => _openItem(appState, item),
-                    );
-                  }
-                  return ExpansionTile(
-                    key: PageStorageKey<String>('luci-menu-${item.key}'),
-                    initiallyExpanded: _query.isNotEmpty,
-                    leading: Icon(_iconFor(item.key)),
-                    title: Text(item.title),
-                    children: item.children
+                  )
+                else
+                  CupertinoListSection.insetGrouped(
+                    margin: const EdgeInsets.symmetric(horizontal: 16),
+                    children: items
                         .map(
-                          (child) => ListTile(
-                            contentPadding: const EdgeInsets.only(
-                              left: 72,
-                              right: 16,
+                          (item) => CupertinoListTile(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 8,
                             ),
-                            title: Text(child.title),
-                            trailing: const Icon(
-                              Icons.open_in_new_rounded,
-                              size: 18,
+                            leadingSize: 32,
+                            leadingToTitle: 12,
+                            leading: _MenuIcon(
+                              icon: _iconFor(item.key),
+                              color: _colorFor(item.key),
                             ),
-                            onTap: () => _openItem(appState, child),
+                            title: Text(item.title),
+                            trailing: const CupertinoListTileChevron(),
+                            onTap: item.children.isEmpty
+                                ? () => _openItem(appState, item)
+                                : () => _openSubmenu(appState, item),
                           ),
                         )
                         .toList(),
-                  );
-                }),
+                  ),
               ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _LuciSubmenuScreen extends StatelessWidget {
+  final LuciMenuItem item;
+  final ValueChanged<LuciMenuItem> onOpenItem;
+
+  const _LuciSubmenuScreen({required this.item, required this.onOpenItem});
+
+  @override
+  Widget build(BuildContext context) {
+    return CupertinoPageScaffold(
+      backgroundColor: CupertinoColors.systemGroupedBackground.resolveFrom(
+        context,
+      ),
+      navigationBar: CupertinoNavigationBar(
+        middle: Text(item.title),
+        previousPageTitle: 'LuCI',
+      ),
+      child: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.only(top: 18, bottom: 24),
+          children: [
+            CupertinoListSection.insetGrouped(
+              header: Text(item.title),
+              margin: const EdgeInsets.symmetric(horizontal: 16),
+              children: item.children
+                  .map(
+                    (child) => CupertinoListTile(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 9,
+                      ),
+                      title: Text(child.title),
+                      trailing: const CupertinoListTileChevron(),
+                      onTap: () => onOpenItem(child),
+                    ),
+                  )
+                  .toList(),
             ),
-          );
-        },
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MenuIcon extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+
+  const _MenuIcon({required this.icon, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 32,
+      height: 32,
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(7),
+      ),
+      alignment: Alignment.center,
+      child: Icon(icon, color: CupertinoColors.white, size: 19),
+    );
+  }
+}
+
+class _NativeMenuError extends StatelessWidget {
+  final String message;
+  final VoidCallback onRetry;
+
+  const _NativeMenuError({required this.message, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              CupertinoIcons.exclamationmark_circle,
+              size: 42,
+              color: CupertinoColors.systemRed,
+            ),
+            const SizedBox(height: 14),
+            const Text('菜单加载失败'),
+            const SizedBox(height: 8),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: CupertinoColors.secondaryLabel.resolveFrom(context),
+              ),
+            ),
+            const SizedBox(height: 18),
+            CupertinoButton.filled(onPressed: onRetry, child: const Text('重试')),
+          ],
+        ),
       ),
     );
   }

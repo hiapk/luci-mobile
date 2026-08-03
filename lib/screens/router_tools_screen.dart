@@ -1,55 +1,70 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/material.dart' show SelectableText;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:luci_mobile/main.dart';
-import 'package:luci_mobile/widgets/luci_app_bar.dart';
 
 class RouterToolsScreen extends StatelessWidget {
   const RouterToolsScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final tools =
-        <({IconData icon, String title, String subtitle, Widget page})>[
-          (
-            icon: Icons.article_outlined,
-            title: '系统日志',
-            subtitle: '查看系统和内核日志',
-            page: const RouterLogsScreen(),
-          ),
-          (
-            icon: Icons.memory_outlined,
-            title: '进程',
-            subtitle: '按 CPU 使用率查看运行进程',
-            page: const RouterProcessesScreen(),
-          ),
-          (
-            icon: Icons.power_settings_new_rounded,
-            title: '启动服务',
-            subtitle: '管理服务状态和开机启动',
-            page: const RouterStartupServicesScreen(),
-          ),
-        ];
-    return Scaffold(
-      appBar: const LuciAppBar(title: '管理工具', showBack: true),
-      body: ListView.separated(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        itemCount: tools.length,
-        separatorBuilder: (_, _) => const Divider(height: 1, indent: 72),
-        itemBuilder: (context, index) {
-          final tool = tools[index];
-          return ListTile(
-            minTileHeight: 72,
-            leading: Icon(tool.icon),
-            title: Text(tool.title),
-            subtitle: Text(tool.subtitle),
-            trailing: const Icon(Icons.chevron_right_rounded),
-            onTap: () => Navigator.of(
-              context,
-            ).push(MaterialPageRoute<void>(builder: (_) => tool.page)),
-          );
-        },
+    final tools = <({IconData icon, String title, Color color, Widget page})>[
+      (
+        icon: CupertinoIcons.doc_text_fill,
+        title: '系统日志',
+        color: CupertinoColors.systemOrange,
+        page: const RouterLogsScreen(),
+      ),
+      (
+        icon: CupertinoIcons.chart_bar_fill,
+        title: '进程',
+        color: CupertinoColors.systemIndigo,
+        page: const RouterProcessesScreen(),
+      ),
+      (
+        icon: CupertinoIcons.gear_alt_fill,
+        title: '启动服务',
+        color: CupertinoColors.systemGreen,
+        page: const RouterStartupServicesScreen(),
+      ),
+    ];
+    return CupertinoPageScaffold(
+      backgroundColor: CupertinoColors.systemGroupedBackground.resolveFrom(
+        context,
+      ),
+      navigationBar: const CupertinoNavigationBar(
+        middle: Text('管理工具'),
+        previousPageTitle: '更多',
+      ),
+      child: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.only(top: 18, bottom: 24),
+          children: [
+            CupertinoListSection.insetGrouped(
+              margin: const EdgeInsets.symmetric(horizontal: 16),
+              children: tools
+                  .map(
+                    (tool) => CupertinoListTile(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 8,
+                      ),
+                      leadingSize: 32,
+                      leadingToTitle: 12,
+                      leading: _NativeIcon(icon: tool.icon, color: tool.color),
+                      title: Text(tool.title),
+                      trailing: const CupertinoListTileChevron(),
+                      onTap: () => Navigator.of(context).push(
+                        CupertinoPageRoute<void>(builder: (_) => tool.page),
+                      ),
+                    ),
+                  )
+                  .toList(),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -85,74 +100,81 @@ class _RouterLogsScreenState extends ConsumerState<RouterLogsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: LuciAppBar(
-        title: '日志',
-        showBack: true,
-        actions: [
-          IconButton(
-            onPressed: _reload,
-            icon: const Icon(Icons.refresh_rounded),
-            tooltip: '刷新',
-          ),
-        ],
+    return CupertinoPageScaffold(
+      backgroundColor: CupertinoColors.systemBackground.resolveFrom(context),
+      navigationBar: CupertinoNavigationBar(
+        middle: const Text('日志'),
+        previousPageTitle: '管理工具',
+        trailing: CupertinoButton(
+          padding: EdgeInsets.zero,
+          onPressed: _reload,
+          child: const Icon(CupertinoIcons.refresh, size: 21),
+        ),
       ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: SegmentedButton<_LogType>(
-              segments: const [
-                ButtonSegment(value: _LogType.system, label: Text('系统日志')),
-                ButtonSegment(value: _LogType.kernel, label: Text('内核日志')),
-              ],
-              selected: {_type},
-              onSelectionChanged: (selection) {
-                setState(() {
-                  _type = selection.first;
-                  _future = _load();
-                });
-              },
-            ),
-          ),
-          const Divider(height: 1),
-          Expanded(
-            child: FutureBuilder<List<String>>(
-              future: _future,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                if (snapshot.hasError) {
-                  return _ToolError(
-                    message: snapshot.error.toString(),
-                    onRetry: _reload,
-                  );
-                }
-                final lines = snapshot.data ?? const [];
-                if (lines.isEmpty) return const Center(child: Text('暂无日志'));
-                return RefreshIndicator(
-                  onRefresh: () async {
-                    _reload();
-                    await _future;
+      child: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+              child: SizedBox(
+                width: double.infinity,
+                child: CupertinoSlidingSegmentedControl<_LogType>(
+                  groupValue: _type,
+                  children: const {
+                    _LogType.system: Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 12),
+                      child: Text('系统日志'),
+                    ),
+                    _LogType.kernel: Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 12),
+                      child: Text('内核日志'),
+                    ),
                   },
-                  child: ListView.separated(
-                    padding: const EdgeInsets.all(12),
+                  onValueChanged: (value) {
+                    if (value == null || value == _type) return;
+                    setState(() {
+                      _type = value;
+                      _future = _load();
+                    });
+                  },
+                ),
+              ),
+            ),
+            Expanded(
+              child: FutureBuilder<List<String>>(
+                future: _future,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting &&
+                      !snapshot.hasData) {
+                    return const _NativeLoading();
+                  }
+                  if (snapshot.hasError) {
+                    return _NativeError(
+                      message: snapshot.error.toString(),
+                      onRetry: _reload,
+                    );
+                  }
+                  final lines = snapshot.data ?? const [];
+                  if (lines.isEmpty) return const _NativeEmpty(label: '暂无日志');
+                  return ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(16, 6, 16, 24),
                     itemCount: lines.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 6),
+                    separatorBuilder: (_, _) => const SizedBox(height: 7),
                     itemBuilder: (context, index) => SelectableText(
                       lines[index],
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        fontFamily: 'monospace',
+                      style: TextStyle(
+                        color: CupertinoColors.label.resolveFrom(context),
+                        fontFamily: 'Menlo',
+                        fontSize: 12,
                         height: 1.35,
                       ),
                     ),
-                  ),
-                );
-              },
+                  );
+                },
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -189,75 +211,170 @@ class _RouterProcessesScreenState extends ConsumerState<RouterProcessesScreen> {
     return ref.read(appStateProvider).fetchProcesses(context: context);
   }
 
-  String _value(Map<String, dynamic> process, List<String> keys) {
-    for (final key in keys) {
-      final value = process[key]?.toString();
-      if (value != null && value.isNotEmpty) return value;
-    }
-    return '-';
-  }
+  void _reload() => setState(() => _future = _load());
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: LuciAppBar(
-        title: '进程',
-        showBack: true,
-        actions: [
-          IconButton(
-            onPressed: () => setState(() => _future = _load()),
-            icon: const Icon(Icons.refresh_rounded),
-            tooltip: '刷新',
-          ),
-        ],
+    return CupertinoPageScaffold(
+      backgroundColor: CupertinoColors.systemGroupedBackground.resolveFrom(
+        context,
       ),
-      body: FutureBuilder<List<Map<String, dynamic>>>(
-        future: _future,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting &&
-              !snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            return _ToolError(
-              message: snapshot.error.toString(),
-              onRetry: () => setState(() => _future = _load()),
-            );
-          }
-          final processes = snapshot.data ?? const [];
-          if (processes.isEmpty) return const Center(child: Text('暂无进程数据'));
-          return ListView.separated(
-            itemCount: processes.length,
-            separatorBuilder: (_, _) => const Divider(height: 1, indent: 16),
-            itemBuilder: (context, index) {
-              final process = processes[index];
-              final command = _value(process, const ['COMMAND', 'command']);
-              final name = command.split(' ').first.split('/').last;
-              final pid = _value(process, const ['PID', 'pid']);
-              final cpu = _value(process, const ['%CPU', 'cpu']);
-              final memory = _value(process, const ['%MEM', 'mem']);
-              return ExpansionTile(
-                title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
-                subtitle: Text('PID $pid  ·  CPU $cpu  ·  内存 $memory'),
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: SelectableText(
-                        command,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          fontFamily: 'monospace',
+      navigationBar: CupertinoNavigationBar(
+        middle: const Text('进程'),
+        previousPageTitle: '管理工具',
+        trailing: CupertinoButton(
+          padding: EdgeInsets.zero,
+          onPressed: _reload,
+          child: const Icon(CupertinoIcons.refresh, size: 21),
+        ),
+      ),
+      child: SafeArea(
+        child: FutureBuilder<List<Map<String, dynamic>>>(
+          future: _future,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting &&
+                !snapshot.hasData) {
+              return const _NativeLoading();
+            }
+            if (snapshot.hasError) {
+              return _NativeError(
+                message: snapshot.error.toString(),
+                onRetry: _reload,
+              );
+            }
+            final processes = snapshot.data ?? const [];
+            if (processes.isEmpty) {
+              return const _NativeEmpty(label: '暂无进程数据');
+            }
+            return ListView(
+              padding: const EdgeInsets.only(top: 12, bottom: 24),
+              children: [
+                CupertinoListSection.insetGrouped(
+                  header: Text('${processes.length} 个进程'),
+                  margin: const EdgeInsets.symmetric(horizontal: 16),
+                  children: processes.map((process) {
+                    final command = _processValue(process, const [
+                      'COMMAND',
+                      'command',
+                    ]);
+                    final name = command.split(' ').first.split('/').last;
+                    final pid = _processValue(process, const ['PID', 'pid']);
+                    final cpu = _processValue(process, const ['%CPU', 'cpu']);
+                    final memory = _processValue(process, const [
+                      '%MEM',
+                      'mem',
+                    ]);
+                    return CupertinoListTile(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 7,
+                      ),
+                      title: Text(
+                        name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: Text('PID $pid  ·  CPU $cpu  ·  内存 $memory'),
+                      trailing: const CupertinoListTileChevron(),
+                      onTap: () => Navigator.of(context).push(
+                        CupertinoPageRoute<void>(
+                          builder: (_) => _ProcessDetailsScreen(
+                            name: name,
+                            command: command,
+                            pid: pid,
+                            cpu: cpu,
+                            memory: memory,
+                          ),
                         ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _ProcessDetailsScreen extends StatelessWidget {
+  final String name;
+  final String command;
+  final String pid;
+  final String cpu;
+  final String memory;
+
+  const _ProcessDetailsScreen({
+    required this.name,
+    required this.command,
+    required this.pid,
+    required this.cpu,
+    required this.memory,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return CupertinoPageScaffold(
+      backgroundColor: CupertinoColors.systemGroupedBackground.resolveFrom(
+        context,
+      ),
+      navigationBar: CupertinoNavigationBar(
+        middle: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
+        previousPageTitle: '进程',
+      ),
+      child: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.only(top: 18, bottom: 24),
+          children: [
+            CupertinoListSection.insetGrouped(
+              margin: const EdgeInsets.symmetric(horizontal: 16),
+              children: [
+                _ProcessDetailTile(label: 'PID', value: pid),
+                _ProcessDetailTile(label: 'CPU', value: cpu),
+                _ProcessDetailTile(label: '内存', value: memory),
+                CupertinoListTile(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 10,
+                  ),
+                  title: const Text('命令'),
+                  subtitle: Padding(
+                    padding: const EdgeInsets.only(top: 5),
+                    child: SelectableText(
+                      command,
+                      style: TextStyle(
+                        color: CupertinoColors.secondaryLabel.resolveFrom(
+                          context,
+                        ),
+                        fontFamily: 'Menlo',
+                        fontSize: 12,
                       ),
                     ),
                   ),
-                ],
-              );
-            },
-          );
-        },
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
+    );
+  }
+}
+
+class _ProcessDetailTile extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _ProcessDetailTile({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return CupertinoListTile(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      title: Text(label),
+      additionalInfo: Text(value),
     );
   }
 }
@@ -294,171 +411,246 @@ class _RouterStartupServicesScreenState
           .read(appStateProvider)
           .controlStartupService(name, action, context: context);
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('$name 操作成功')));
       _reload();
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(error.toString())));
+      await showCupertinoDialog<void>(
+        context: context,
+        builder: (dialogContext) => CupertinoAlertDialog(
+          title: const Text('操作失败'),
+          content: Text(error.toString()),
+          actions: [
+            CupertinoDialogAction(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('好'),
+            ),
+          ],
+        ),
+      );
     } finally {
       if (mounted) setState(() => _busyServices.remove(name));
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: LuciAppBar(
-        title: '启动服务',
-        showBack: true,
+  Future<void> _showActions(
+    String name, {
+    required bool enabled,
+    required bool running,
+  }) async {
+    final action = await showCupertinoModalPopup<String>(
+      context: context,
+      builder: (popupContext) => CupertinoActionSheet(
+        title: Text(name),
+        message: Text(
+          '${running ? '运行中' : '已停止'} · ${enabled ? '开机启动' : '未启用'}',
+        ),
         actions: [
-          IconButton(
-            onPressed: _reload,
-            icon: const Icon(Icons.refresh_rounded),
-            tooltip: '刷新',
+          CupertinoActionSheetAction(
+            onPressed: () =>
+                Navigator.of(popupContext).pop(enabled ? 'disable' : 'enable'),
+            child: Text(enabled ? '禁用开机启动' : '启用开机启动'),
+          ),
+          CupertinoActionSheetAction(
+            onPressed: () => Navigator.of(popupContext).pop('start'),
+            child: const Text('启动'),
+          ),
+          CupertinoActionSheetAction(
+            onPressed: () => Navigator.of(popupContext).pop('restart'),
+            child: const Text('重新启动'),
+          ),
+          CupertinoActionSheetAction(
+            isDestructiveAction: true,
+            onPressed: () => Navigator.of(popupContext).pop('stop'),
+            child: const Text('停止'),
           ),
         ],
+        cancelButton: CupertinoActionSheetAction(
+          isDefaultAction: true,
+          onPressed: () => Navigator.of(popupContext).pop(),
+          child: const Text('取消'),
+        ),
       ),
-      body: FutureBuilder<Map<String, dynamic>>(
-        future: _future,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting &&
-              !snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            return _ToolError(
-              message: snapshot.error.toString(),
-              onRetry: _reload,
-            );
-          }
-          final entries = (snapshot.data ?? const {}).entries.toList()
-            ..sort((a, b) {
-              int startOf(MapEntry<String, dynamic> entry) {
-                final value = entry.value;
-                if (value is Map) {
-                  return int.tryParse(
-                        (value['start'] ?? value['index'])?.toString() ?? '',
-                      ) ??
-                      999;
-                }
-                return 999;
-              }
+    );
+    if (action != null && mounted) {
+      await _runAction(name, action);
+    }
+  }
 
-              return startOf(a).compareTo(startOf(b));
-            });
-          if (entries.isEmpty) return const Center(child: Text('暂无启动服务数据'));
+  @override
+  Widget build(BuildContext context) {
+    return CupertinoPageScaffold(
+      backgroundColor: CupertinoColors.systemGroupedBackground.resolveFrom(
+        context,
+      ),
+      navigationBar: CupertinoNavigationBar(
+        middle: const Text('启动服务'),
+        previousPageTitle: '管理工具',
+        trailing: CupertinoButton(
+          padding: EdgeInsets.zero,
+          onPressed: _reload,
+          child: const Icon(CupertinoIcons.refresh, size: 21),
+        ),
+      ),
+      child: SafeArea(
+        child: FutureBuilder<Map<String, dynamic>>(
+          future: _future,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting &&
+                !snapshot.hasData) {
+              return const _NativeLoading();
+            }
+            if (snapshot.hasError) {
+              return _NativeError(
+                message: snapshot.error.toString(),
+                onRetry: _reload,
+              );
+            }
+            final entries = (snapshot.data ?? const {}).entries.toList()
+              ..sort((a, b) => _serviceOrder(a).compareTo(_serviceOrder(b)));
+            if (entries.isEmpty) {
+              return const _NativeEmpty(label: '暂无启动服务数据');
+            }
 
-          return RefreshIndicator(
-            onRefresh: () async {
-              _reload();
-              await _future;
-            },
-            child: ListView.separated(
-              itemCount: entries.length,
-              separatorBuilder: (_, _) => const Divider(height: 1, indent: 16),
-              itemBuilder: (context, index) {
-                final entry = entries[index];
-                final data = entry.value is Map ? entry.value as Map : const {};
-                final enabled = data['enabled'] == true;
-                final running = data['running'] == true;
-                final busy = _busyServices.contains(entry.key);
-                return ExpansionTile(
-                  title: Text(entry.key),
-                  subtitle: Text(
-                    '${running ? '运行中' : '已停止'}  ·  ${enabled ? '开机启动' : '未启用'}',
-                  ),
-                  leading: busy
-                      ? const SizedBox.square(
-                          dimension: 24,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : Icon(
-                          running
-                              ? Icons.check_circle_outline_rounded
-                              : Icons.pause_circle_outline_rounded,
-                          color: running ? Colors.green : null,
-                        ),
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                      child: Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          OutlinedButton(
-                            onPressed: busy
-                                ? null
-                                : () => unawaited(
-                                    _runAction(
-                                      entry.key,
-                                      enabled ? 'disable' : 'enable',
-                                    ),
-                                  ),
-                            child: Text(enabled ? '禁用启动' : '启用启动'),
-                          ),
-                          OutlinedButton(
-                            onPressed: busy
-                                ? null
-                                : () =>
-                                      unawaited(_runAction(entry.key, 'start')),
-                            child: const Text('启动'),
-                          ),
-                          OutlinedButton(
-                            onPressed: busy
-                                ? null
-                                : () => unawaited(
-                                    _runAction(entry.key, 'restart'),
-                                  ),
-                            child: const Text('重启'),
-                          ),
-                          OutlinedButton(
-                            onPressed: busy
-                                ? null
-                                : () =>
-                                      unawaited(_runAction(entry.key, 'stop')),
-                            child: const Text('停止'),
-                          ),
-                        ],
+            return ListView(
+              padding: const EdgeInsets.only(top: 12, bottom: 24),
+              children: [
+                CupertinoListSection.insetGrouped(
+                  margin: const EdgeInsets.symmetric(horizontal: 16),
+                  children: entries.map((entry) {
+                    final data = entry.value is Map
+                        ? entry.value as Map
+                        : const {};
+                    final enabled = data['enabled'] == true;
+                    final running = data['running'] == true;
+                    final busy = _busyServices.contains(entry.key);
+                    return CupertinoListTile(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 7,
                       ),
-                    ),
-                  ],
-                );
-              },
-            ),
-          );
-        },
+                      leadingSize: 22,
+                      leadingToTitle: 10,
+                      leading: busy
+                          ? const CupertinoActivityIndicator(radius: 9)
+                          : Icon(
+                              running
+                                  ? CupertinoIcons.check_mark_circled_solid
+                                  : CupertinoIcons.pause_circle,
+                              size: 21,
+                              color: running
+                                  ? CupertinoColors.systemGreen
+                                  : CupertinoColors.systemGrey,
+                            ),
+                      title: Text(entry.key),
+                      subtitle: Text(
+                        '${running ? '运行中' : '已停止'}  ·  ${enabled ? '开机启动' : '未启用'}',
+                      ),
+                      trailing: const CupertinoListTileChevron(),
+                      onTap: busy
+                          ? null
+                          : () => _showActions(
+                              entry.key,
+                              enabled: enabled,
+                              running: running,
+                            ),
+                    );
+                  }).toList(),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  static int _serviceOrder(MapEntry<String, dynamic> entry) {
+    final value = entry.value;
+    if (value is! Map) return 999;
+    return int.tryParse((value['start'] ?? value['index'])?.toString() ?? '') ??
+        999;
+  }
+}
+
+String _processValue(Map<String, dynamic> process, List<String> keys) {
+  for (final key in keys) {
+    final value = process[key]?.toString();
+    if (value != null && value.isNotEmpty) return value;
+  }
+  return '-';
+}
+
+class _NativeIcon extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+
+  const _NativeIcon({required this.icon, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 32,
+      height: 32,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(7),
+      ),
+      child: Icon(icon, color: CupertinoColors.white, size: 19),
+    );
+  }
+}
+
+class _NativeLoading extends StatelessWidget {
+  const _NativeLoading();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Center(child: CupertinoActivityIndicator());
+  }
+}
+
+class _NativeEmpty extends StatelessWidget {
+  final String label;
+
+  const _NativeEmpty({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Text(
+        label,
+        style: TextStyle(
+          color: CupertinoColors.secondaryLabel.resolveFrom(context),
+        ),
       ),
     );
   }
 }
 
-class _ToolError extends StatelessWidget {
+class _NativeError extends StatelessWidget {
   final String message;
   final VoidCallback onRetry;
 
-  const _ToolError({required this.message, required this.onRetry});
+  const _NativeError({required this.message, required this.onRetry});
 
   @override
   Widget build(BuildContext context) {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(28),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.error_outline_rounded, size: 48),
+            const Icon(
+              CupertinoIcons.exclamationmark_circle,
+              size: 42,
+              color: CupertinoColors.systemRed,
+            ),
             const SizedBox(height: 12),
             Text(message, textAlign: TextAlign.center),
-            const SizedBox(height: 16),
-            FilledButton.icon(
-              onPressed: onRetry,
-              icon: const Icon(Icons.refresh_rounded),
-              label: const Text('重试'),
-            ),
+            const SizedBox(height: 18),
+            CupertinoButton.filled(onPressed: onRetry, child: const Text('重试')),
           ],
         ),
       ),

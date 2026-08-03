@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:luci_mobile/main.dart';
@@ -312,7 +313,7 @@ class _MoreScreenState extends ConsumerState<MoreScreen> {
                       subtitle: '日志、进程和启动服务',
                       onTap: () {
                         Navigator.of(context).push(
-                          MaterialPageRoute<void>(
+                          CupertinoPageRoute<void>(
                             builder: (context) => const RouterToolsScreen(),
                           ),
                         );
