@@ -14,7 +14,7 @@ class DashboardSettingsListScreen extends ConsumerWidget {
     final routers = appState.routers;
 
     return Scaffold(
-      appBar: const LuciAppBar(title: 'Dashboard Settings', showBack: true),
+      appBar: const LuciAppBar(title: '概览设置', showBack: true),
       body: routers.isEmpty
           ? Center(
               child: Padding(
@@ -22,15 +22,19 @@ class DashboardSettingsListScreen extends ConsumerWidget {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.router_outlined, size: 56, color: Theme.of(context).colorScheme.outline),
+                    Icon(
+                      Icons.router_outlined,
+                      size: 56,
+                      color: Theme.of(context).colorScheme.outline,
+                    ),
                     SizedBox(height: LuciSpacing.md),
                     Text(
-                      'No Routers Added',
+                      '尚未添加路由器',
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                     SizedBox(height: LuciSpacing.xs),
                     Text(
-                      'Add a router to customize its dashboard settings.',
+                      '添加路由器后即可自定义其概览设置。',
                       style: Theme.of(context).textTheme.bodySmall,
                       textAlign: TextAlign.center,
                     ),
@@ -83,16 +87,16 @@ class DashboardSettingsListScreen extends ConsumerWidget {
                     onTap: () {
                       Navigator.of(context).push(
                         MaterialPageRoute(
-                          builder: (_) => RouterDashboardSettingsScreen(
-                            routerId: r.id,
-                          ),
+                          builder: (_) =>
+                              RouterDashboardSettingsScreen(routerId: r.id),
                         ),
                       );
                     },
                   ),
                 );
               },
-              separatorBuilder: (context, index) => SizedBox(height: LuciSpacing.sm),
+              separatorBuilder: (context, index) =>
+                  SizedBox(height: LuciSpacing.sm),
               itemCount: routers.length,
             ),
     );

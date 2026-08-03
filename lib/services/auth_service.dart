@@ -12,6 +12,7 @@ class RealAuthService implements IAuthService {
   String? _sysauth;
   String? _ipAddress;
   bool _useHttps = false;
+  bool _requiresOtp = false;
 
   RealAuthService(this._apiService);
 
@@ -23,6 +24,8 @@ class RealAuthService implements IAuthService {
   bool get useHttps => _useHttps;
   @override
   bool get isAuthenticated => _sysauth != null;
+  @override
+  bool get requiresOtp => _requiresOtp;
 
   @override
   Future<void> login(
@@ -30,9 +33,17 @@ class RealAuthService implements IAuthService {
     String username,
     String password,
     bool useHttps, {
+    String? otp,
     BuildContext? context,
   }) async {
-    await _login(ipAddress, username, password, useHttps, context: context);
+    await _login(
+      ipAddress,
+      username,
+      password,
+      useHttps,
+      otp: otp,
+      context: context,
+    );
   }
 
   Future<bool> _login(
@@ -40,8 +51,11 @@ class RealAuthService implements IAuthService {
     String user,
     String pass,
     bool useHttps, {
+    String? otp,
     BuildContext? context,
   }) async {
+    _sysauth = null;
+    _requiresOtp = false;
     try {
       // Check if the API service is RealApiService to use protocol detection
       if (_apiService is RealApiService) {
@@ -51,10 +65,12 @@ class RealAuthService implements IAuthService {
           user,
           pass,
           useHttps,
+          otp: otp,
           context: context,
         );
 
         if (loginResult.token != null) {
+          _requiresOtp = false;
           _sysauth = loginResult.token;
           _ipAddress = ip;
           _useHttps = loginResult.actualUseHttps; // Use the detected protocol
@@ -74,6 +90,7 @@ class RealAuthService implements IAuthService {
 
           return true;
         }
+        _requiresOtp = loginResult.requiresOtp;
         return false;
       } else {
         // Fallback for mock service
@@ -82,6 +99,7 @@ class RealAuthService implements IAuthService {
           user,
           pass,
           useHttps,
+          otp: otp,
           context: context,
         );
         _sysauth = token;
@@ -150,6 +168,7 @@ class RealAuthService implements IAuthService {
     _sysauth = null;
     _ipAddress = null;
     _useHttps = false;
+    _requiresOtp = false;
     await _secureStorageService.clearCredentials();
   }
 

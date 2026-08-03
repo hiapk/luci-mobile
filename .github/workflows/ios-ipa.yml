@@ -1,0 +1,57 @@
+name: Build TrollStore IPA
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-ios:
+    name: Build unsigned iOS IPA
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.35.2'
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
+
+      - name: Build iOS app without a development certificate
+        run: flutter build ios --release --no-codesign
+
+      - name: Package TrollStore IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/trollstore/Payload
+          cp -R build/ios/iphoneos/Runner.app build/trollstore/Payload/
+          /usr/bin/codesign --force --deep --sign - build/trollstore/Payload/Runner.app
+          cd build/trollstore
+          /usr/bin/zip -qry ../LuCI-Mobile-2FA-TrollStore.ipa Payload
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: LuCI-Mobile-2FA-TrollStore
+          path: build/LuCI-Mobile-2FA-TrollStore.ipa
+          if-no-files-found: error
+          retention-days: 30

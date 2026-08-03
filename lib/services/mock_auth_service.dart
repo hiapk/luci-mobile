@@ -20,11 +20,15 @@ class MockAuthService implements IAuthService {
   bool get isAuthenticated => _isAuthenticated;
 
   @override
+  bool get requiresOtp => false;
+
+  @override
   Future<void> login(
     String ipAddress,
     String username,
     String password,
     bool useHttps, {
+    String? otp,
     BuildContext? context,
   }) async {
     // Simulate a short delay for realism

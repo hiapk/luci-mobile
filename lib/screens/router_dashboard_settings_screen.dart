@@ -1,3 +1,5 @@
+// ignore_for_file: deprecated_member_use
+
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -64,8 +66,7 @@ class _RouterDashboardSettingsScreenState
       }
       if (appState.dashboardData == null) {
         setState(() {
-          _errorMessage =
-              'Unable to load dashboard data. Please check your connection.';
+          _errorMessage = '无法加载概览数据，请检查连接。';
           _isLoading = false;
         });
         return;
@@ -75,7 +76,7 @@ class _RouterDashboardSettingsScreenState
       setState(() => _isLoading = false);
     } catch (e) {
       setState(() {
-        _errorMessage = 'Failed to load settings: $e';
+        _errorMessage = '设置加载失败：$e';
         _isLoading = false;
       });
     }
@@ -165,24 +166,26 @@ class _RouterDashboardSettingsScreenState
   Widget _buildThroughputSection() {
     final interfaces = _availableWiredInterfaces.toList()..sort();
     return _buildSection(
-      title: 'Throughput Monitoring',
-      subtitle: 'Configure which interfaces to monitor',
+      title: '速率监控',
+      subtitle: '配置需要监控的接口',
       icon: Icons.speed,
       initiallyExpanded: true,
       children: [
         Container(
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceContainerHighest
-                .withValues(alpha: 0.3),
+            color: Theme.of(
+              context,
+            ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
             borderRadius: BorderRadius.circular(12),
           ),
           child: Column(
             children: [
               SwitchListTile.adaptive(
                 title: Text(
-                  'Show All Interfaces',
-                  style: LuciTextStyles.detailValue(context)
-                      .copyWith(fontWeight: FontWeight.w600),
+                  '显示全部接口',
+                  style: LuciTextStyles.detailValue(
+                    context,
+                  ).copyWith(fontWeight: FontWeight.w600),
                 ),
                 value: _preferences.showAllThroughput,
                 onChanged: (value) {
@@ -195,8 +198,9 @@ class _RouterDashboardSettingsScreenState
                     } else {
                       _preferences = _preferences.copyWith(
                         showAllThroughput: false,
-                        primaryThroughputInterface:
-                            interfaces.isNotEmpty ? interfaces.first : null,
+                        primaryThroughputInterface: interfaces.isNotEmpty
+                            ? interfaces.first
+                            : null,
                       );
                     }
                   });
@@ -221,8 +225,8 @@ class _RouterDashboardSettingsScreenState
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
                 value: iface,
-                groupValue: _preferences.primaryThroughputInterface, // ignore: deprecated_member_use
-                onChanged: (value) { // ignore: deprecated_member_use
+                groupValue: _preferences.primaryThroughputInterface,
+                onChanged: (value) {
                   setState(() {
                     _preferences = _preferences.copyWith(
                       showAllThroughput: false,
@@ -237,7 +241,7 @@ class _RouterDashboardSettingsScreenState
               ),
             );
           }),
-        ]
+        ],
       ],
     );
   }
@@ -246,23 +250,25 @@ class _RouterDashboardSettingsScreenState
     if (_availableWirelessInterfaces.isEmpty) return const SizedBox.shrink();
     final sortedInterfaces = _availableWirelessInterfaces.toList()..sort();
     return _buildSection(
-      title: 'Wireless Networks',
-      subtitle: 'Choose which wireless networks to display',
+      title: '无线网络',
+      subtitle: '选择要显示的无线网络',
       icon: Icons.wifi,
       children: [
         Container(
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceContainerHighest
-                .withValues(alpha: 0.3),
+            color: Theme.of(
+              context,
+            ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
             borderRadius: BorderRadius.circular(12),
           ),
           child: Column(
             children: [
               SwitchListTile.adaptive(
                 title: Text(
-                  'Show All Networks',
-                  style: LuciTextStyles.detailValue(context)
-                      .copyWith(fontWeight: FontWeight.w600),
+                  '显示全部网络',
+                  style: LuciTextStyles.detailValue(
+                    context,
+                  ).copyWith(fontWeight: FontWeight.w600),
                 ),
                 value: _preferences.enabledWirelessInterfaces.isEmpty,
                 onChanged: (value) {
@@ -273,8 +279,9 @@ class _RouterDashboardSettingsScreenState
                       );
                     } else {
                       _preferences = _preferences.copyWith(
-                        enabledWirelessInterfaces:
-                            Set.from(_availableWirelessInterfaces),
+                        enabledWirelessInterfaces: Set.from(
+                          _availableWirelessInterfaces,
+                        ),
                       );
                     }
                   });
@@ -289,27 +296,31 @@ class _RouterDashboardSettingsScreenState
         if (_preferences.enabledWirelessInterfaces.isNotEmpty) ...[
           SizedBox(height: LuciSpacing.sm),
           ...sortedInterfaces.map((interface) {
-            final isEnabled =
-                _preferences.enabledWirelessInterfaces.contains(interface);
+            final isEnabled = _preferences.enabledWirelessInterfaces.contains(
+              interface,
+            );
             return Padding(
               padding: EdgeInsets.symmetric(vertical: LuciSpacing.xs),
               child: CheckboxListTile(
-                title: Text(interface, style: LuciTextStyles.detailValue(context)),
+                title: Text(
+                  interface,
+                  style: LuciTextStyles.detailValue(context),
+                ),
                 secondary: Icon(
                   Icons.wifi,
                   size: 20,
                   color: isEnabled
                       ? Theme.of(context).colorScheme.primary
-                      : Theme.of(context)
-                          .colorScheme
-                          .onSurfaceVariant
-                          .withValues(alpha: 0.5),
+                      : Theme.of(
+                          context,
+                        ).colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
                 ),
                 value: isEnabled,
                 onChanged: (value) {
                   setState(() {
-                    final newSet =
-                        Set<String>.from(_preferences.enabledWirelessInterfaces);
+                    final newSet = Set<String>.from(
+                      _preferences.enabledWirelessInterfaces,
+                    );
                     if (value ?? false) {
                       newSet.add(interface);
                     } else {
@@ -336,23 +347,25 @@ class _RouterDashboardSettingsScreenState
     if (_availableWiredInterfaces.isEmpty) return const SizedBox.shrink();
     final sortedInterfaces = _availableWiredInterfaces.toList()..sort();
     return _buildSection(
-      title: 'Network Interfaces',
-      subtitle: 'Choose which wired/VPN interfaces to display',
+      title: '网络接口',
+      subtitle: '选择要显示的有线或 VPN 接口',
       icon: Icons.cable,
       children: [
         Container(
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surfaceContainerHighest
-                .withValues(alpha: 0.3),
+            color: Theme.of(
+              context,
+            ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
             borderRadius: BorderRadius.circular(12),
           ),
           child: Column(
             children: [
               SwitchListTile.adaptive(
                 title: Text(
-                  'Show All Interfaces',
-                  style: LuciTextStyles.detailValue(context)
-                      .copyWith(fontWeight: FontWeight.w600),
+                  '显示全部接口',
+                  style: LuciTextStyles.detailValue(
+                    context,
+                  ).copyWith(fontWeight: FontWeight.w600),
                 ),
                 value: _preferences.enabledWiredInterfaces.isEmpty,
                 onChanged: (value) {
@@ -363,8 +376,9 @@ class _RouterDashboardSettingsScreenState
                       );
                     } else {
                       _preferences = _preferences.copyWith(
-                        enabledWiredInterfaces:
-                            Set.from(_availableWiredInterfaces),
+                        enabledWiredInterfaces: Set.from(
+                          _availableWiredInterfaces,
+                        ),
                       );
                     }
                   });
@@ -379,30 +393,33 @@ class _RouterDashboardSettingsScreenState
         if (_preferences.enabledWiredInterfaces.isNotEmpty) ...[
           SizedBox(height: LuciSpacing.sm),
           ...sortedInterfaces.map((interface) {
-            final isEnabled =
-                _preferences.enabledWiredInterfaces.contains(interface);
+            final isEnabled = _preferences.enabledWiredInterfaces.contains(
+              interface,
+            );
             final description = _getInterfaceDescription(interface);
             return Padding(
               padding: EdgeInsets.symmetric(vertical: LuciSpacing.xs),
               child: CheckboxListTile(
-                title: Text(interface.toUpperCase(),
-                    style: LuciTextStyles.detailValue(context)),
+                title: Text(
+                  interface.toUpperCase(),
+                  style: LuciTextStyles.detailValue(context),
+                ),
                 subtitle: description,
                 secondary: Icon(
                   Icons.cable,
                   size: 20,
                   color: isEnabled
                       ? Theme.of(context).colorScheme.primary
-                      : Theme.of(context)
-                          .colorScheme
-                          .onSurfaceVariant
-                          .withValues(alpha: 0.5),
+                      : Theme.of(
+                          context,
+                        ).colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
                 ),
                 value: isEnabled,
                 onChanged: (value) {
                   setState(() {
-                    final newSet =
-                        Set<String>.from(_preferences.enabledWiredInterfaces);
+                    final newSet = Set<String>.from(
+                      _preferences.enabledWiredInterfaces,
+                    );
                     if (value ?? false) {
                       newSet.add(interface);
                     } else {
@@ -428,19 +445,15 @@ class _RouterDashboardSettingsScreenState
   Widget? _getInterfaceDescription(String interface) {
     final lower = interface.toLowerCase();
     if (lower.startsWith('wan')) {
-      return Text('Wide Area Network',
-          style: LuciTextStyles.cardSubtitle(context));
+      return Text('广域网', style: LuciTextStyles.cardSubtitle(context));
     } else if (lower.startsWith('lan')) {
-      return Text('Local Area Network',
-          style: LuciTextStyles.cardSubtitle(context));
+      return Text('局域网', style: LuciTextStyles.cardSubtitle(context));
     } else if (lower.contains('wireguard') || lower.startsWith('wg')) {
-      return Text('WireGuard VPN',
-          style: LuciTextStyles.cardSubtitle(context));
+      return Text('WireGuard VPN', style: LuciTextStyles.cardSubtitle(context));
     } else if (lower.contains('openvpn')) {
       return Text('OpenVPN', style: LuciTextStyles.cardSubtitle(context));
     } else if (lower.contains('pppoe')) {
-      return Text('PPPoE Connection',
-          style: LuciTextStyles.cardSubtitle(context));
+      return Text('PPPoE 连接', style: LuciTextStyles.cardSubtitle(context));
     }
     return null;
   }
@@ -449,19 +462,19 @@ class _RouterDashboardSettingsScreenState
   Widget build(BuildContext context) {
     if (_isLoading) {
       return const Scaffold(
-        appBar: LuciAppBar(title: 'Dashboard Settings', showBack: true),
+        appBar: LuciAppBar(title: '概览设置', showBack: true),
         body: Center(child: CircularProgressIndicator()),
       );
     }
     if (_errorMessage != null) {
       return Scaffold(
-        appBar: const LuciAppBar(title: 'Dashboard Settings', showBack: true),
+        appBar: const LuciAppBar(title: '概览设置', showBack: true),
         body: Center(child: Text(_errorMessage!)),
       );
     }
 
     return Scaffold(
-      appBar: const LuciAppBar(title: 'Dashboard Settings', showBack: true),
+      appBar: const LuciAppBar(title: '概览设置', showBack: true),
       body: ListView(
         padding: EdgeInsets.symmetric(vertical: LuciSpacing.sm),
         children: [

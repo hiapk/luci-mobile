@@ -53,7 +53,7 @@ class LuciUtilityComponents {
       ),
       child: DropdownButton<String>(
         value: selectedRouter?.id,
-        hint: const Text('Select Router'),
+        hint: const Text('选择路由器'),
         underline: const SizedBox(),
         borderRadius: BorderRadius.circular(LuciSpacing.sm),
         items: routers
@@ -198,7 +198,7 @@ class LuciUtilityComponents {
         break;
       default:
         icon = Icons.device_unknown;
-        label = 'Unknown';
+        label = '未知';
     }
 
     return statusChip(

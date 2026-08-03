@@ -22,6 +22,7 @@ class MockApiService implements IApiService {
     String username,
     String password,
     bool useHttps, {
+    String? otp,
     BuildContext? context,
   }) async {
     // Simulate a short delay for realism

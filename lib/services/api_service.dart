@@ -3,14 +3,24 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:luci_mobile/services/interfaces/api_service_interface.dart';
+import 'package:luci_mobile/services/luci_auth_protocol.dart';
 import '../utils/http_client_manager.dart';
 import '../utils/logger.dart';
 
 class LoginResult {
   final String? token;
+  final String? cookieName;
   final bool actualUseHttps;
+  final LuciLoginStatus status;
 
-  LoginResult({required this.token, required this.actualUseHttps});
+  const LoginResult({
+    required this.token,
+    required this.cookieName,
+    required this.actualUseHttps,
+    required this.status,
+  });
+
+  bool get requiresOtp => status == LuciLoginStatus.otpRequired;
 }
 
 Uri _buildUrl(String ipAddress, bool useHttps, String path) {
@@ -26,6 +36,27 @@ Uri _buildUrl(String ipAddress, bool useHttps, String path) {
 
 class RealApiService implements IApiService {
   final HttpClientManager _httpClientManager = HttpClientManager();
+  final Map<String, LuciSession> _sessions = {};
+  final Map<String, LuciRpcEndpoint> _rpcEndpoints = {};
+  LuciLoginStatus _lastLoginStatus = LuciLoginStatus.rejected;
+  String? _lastCookieName;
+
+  String _routerKey(String ipAddress, bool useHttps) =>
+      '${useHttps ? 'https' : 'http'}://$ipAddress';
+
+  void _rememberSession(
+    String ipAddress,
+    bool useHttps,
+    String token,
+    String? cookieName,
+  ) {
+    final session = LuciSession(
+      token: token,
+      cookieName: cookieName ?? (useHttps ? 'sysauth_https' : 'sysauth_http'),
+      useHttps: useHttps,
+    );
+    _sessions[_routerKey(ipAddress, useHttps)] = session;
+  }
 
   Dio _createHttpClient(
     bool useHttps,
@@ -45,6 +76,7 @@ class RealApiService implements IApiService {
     String username,
     String password,
     bool useHttps, {
+    String? otp,
     BuildContext? context,
   }) async {
     final result = await loginWithProtocolDetection(
@@ -52,6 +84,7 @@ class RealApiService implements IApiService {
       username,
       password,
       useHttps,
+      otp: otp,
       context: context,
     );
     if (result.token == null) {
@@ -67,14 +100,18 @@ class RealApiService implements IApiService {
     String username,
     String password,
     bool initialUseHttps, {
+    String? otp,
     BuildContext? context,
   }) async {
+    _lastLoginStatus = LuciLoginStatus.rejected;
+    _lastCookieName = null;
     // First try with the initial protocol
     var result = await _login(
       ipAddress,
       username,
       password,
       initialUseHttps,
+      otp: otp,
       context: context,
       checkRedirect: true,
     );
@@ -83,11 +120,32 @@ class RealApiService implements IApiService {
     if (result != null && result.startsWith('HTTPS_REDIRECT:')) {
       final token = result.substring('HTTPS_REDIRECT:'.length);
       Logger.info('Login successful via HTTP to HTTPS redirect');
-      return LoginResult(token: token, actualUseHttps: true);
+      _rememberSession(ipAddress, true, token, _lastCookieName);
+      return LoginResult(
+        token: token,
+        cookieName: _lastCookieName,
+        actualUseHttps: true,
+        status: LuciLoginStatus.success,
+      );
     }
 
     if (result != null) {
-      return LoginResult(token: result, actualUseHttps: initialUseHttps);
+      _rememberSession(ipAddress, initialUseHttps, result, _lastCookieName);
+      return LoginResult(
+        token: result,
+        cookieName: _lastCookieName,
+        actualUseHttps: initialUseHttps,
+        status: LuciLoginStatus.success,
+      );
+    }
+
+    if (_lastLoginStatus == LuciLoginStatus.otpRequired) {
+      return LoginResult(
+        token: null,
+        cookieName: null,
+        actualUseHttps: initialUseHttps,
+        status: _lastLoginStatus,
+      );
     }
 
     // If login failed and we were using HTTP, try HTTPS in case of redirect
@@ -99,17 +157,29 @@ class RealApiService implements IApiService {
         username,
         password,
         true, // Try with HTTPS
+        otp: otp,
         context: safeContext, // ignore: use_build_context_synchronously
         checkRedirect: false,
       );
 
       if (result != null) {
         Logger.info('Login successful with HTTPS after redirect detection');
-        return LoginResult(token: result, actualUseHttps: true);
+        _rememberSession(ipAddress, true, result, _lastCookieName);
+        return LoginResult(
+          token: result,
+          cookieName: _lastCookieName,
+          actualUseHttps: true,
+          status: LuciLoginStatus.success,
+        );
       }
     }
 
-    return LoginResult(token: null, actualUseHttps: initialUseHttps);
+    return LoginResult(
+      token: null,
+      cookieName: null,
+      actualUseHttps: initialUseHttps,
+      status: _lastLoginStatus,
+    );
   }
 
   Future<String?> _login(
@@ -117,13 +187,17 @@ class RealApiService implements IApiService {
     String username,
     String password,
     bool useHttps, {
+    String? otp,
     BuildContext? context,
     bool checkRedirect = false,
   }) async {
     final client = _createHttpClient(useHttps, ipAddress, context: context);
     final uri = _buildUrl(ipAddress, useHttps, '/cgi-bin/luci/');
-    final params =
-        'luci_username=${Uri.encodeComponent(username)}&luci_password=${Uri.encodeComponent(password)}';
+    final params = LuciAuthProtocol.loginFields(
+      username: username,
+      password: password,
+      otp: otp,
+    );
 
     try {
       // Normal POST request - Dio will follow redirects by default
@@ -133,7 +207,8 @@ class RealApiService implements IApiService {
         options: Options(
           contentType: Headers.formUrlEncodedContentType,
           followRedirects: true,
-          validateStatus: (code) => code != null && code >= 200 && code < 400 || code == 302,
+          validateStatus: (code) =>
+              code != null && ((code >= 200 && code < 400) || code == 403),
         ),
       );
 
@@ -144,17 +219,12 @@ class RealApiService implements IApiService {
           Logger.info('Detected HTTP to HTTPS redirect: $uri -> $finalUrl');
           // If we got a successful login after redirect, extract the token
           if (response.statusCode == 302 || response.statusCode == 200) {
-            final setCookies = response.headers.map['set-cookie'];
-            if (setCookies != null && setCookies.isNotEmpty) {
-              final cookies = setCookies.join(',').split(',');
-              for (final cookie in cookies) {
-                if (cookie.contains('sysauth')) {
-                  final cookieValue = cookie.split(';')[0].split('=')[1];
-                  // Signal that HTTPS should be used by returning a special marker
-                  // We'll handle this in loginWithProtocolDetection
-                  return 'HTTPS_REDIRECT:$cookieValue';
-                }
-              }
+            final cookie = LuciAuthProtocol.parseAuthCookie(
+              response.headers.map['set-cookie'],
+            );
+            if (cookie != null) {
+              _lastCookieName = cookie.name;
+              return 'HTTPS_REDIRECT:${cookie.value}';
             }
           }
           // No token found, trigger HTTPS retry
@@ -164,52 +234,70 @@ class RealApiService implements IApiService {
 
       if (response.statusCode == 302 || response.statusCode == 200) {
         // Parse Set-Cookie headers to find sysauth cookie
-        final setCookies = response.headers.map['set-cookie'];
-        if (setCookies != null && setCookies.isNotEmpty) {
-          final cookies = setCookies.join(',').split(',');
-          for (final cookie in cookies) {
-            if (cookie.contains('sysauth')) {
-              final cookieValue = cookie.split(';')[0].split('=')[1];
-              return cookieValue;
-            }
-          }
+        final cookie = LuciAuthProtocol.parseAuthCookie(
+          response.headers.map['set-cookie'],
+        );
+        if (cookie != null) {
+          _lastCookieName = cookie.name;
+          _lastLoginStatus = LuciLoginStatus.success;
+          return cookie.value;
         }
       }
+      _lastLoginStatus = LuciAuthProtocol.classifyLoginResponse(
+        statusCode: response.statusCode ?? 0,
+        headers: response.headers.map,
+        body: response.data?.toString() ?? '',
+      );
       return null;
     } on DioException catch (e, stack) {
       Logger.exception('Login failed', e, stack);
 
       final isCertError =
-          e.error is HandshakeException || e.message?.contains('CERTIFICATE_VERIFY_FAILED') == true;
+          e.error is HandshakeException ||
+          e.message?.contains('CERTIFICATE_VERIFY_FAILED') == true;
 
       if (!useHttps && checkRedirect && isCertError) {
-        Logger.info('Detected HTTPS certificate issue during redirect; retrying with HTTPS');
-        final retryContext = context != null && context.mounted ? context : null;
+        Logger.info(
+          'Detected HTTPS certificate issue during redirect; retrying with HTTPS',
+        );
+        final retryContext = context != null && context.mounted
+            ? context
+            : null;
         try {
           return await _login(
             ipAddress,
             username,
             password,
             true,
+            otp: otp,
             context: retryContext, // ignore: use_build_context_synchronously
             checkRedirect: false,
           );
         } on DioException catch (httpsError, httpsStack) {
-          Logger.exception('HTTPS retry after redirect failed', httpsError, httpsStack);
+          Logger.exception(
+            'HTTPS retry after redirect failed',
+            httpsError,
+            httpsStack,
+          );
         }
       }
 
       if (useHttps && context != null && context.mounted && isCertError) {
         // Try to prompt for certificate acceptance
-        final accepted = await _httpClientManager.promptForCertificateAcceptance(
-          context: context,
-          hostWithPort: ipAddress,
-          useHttps: useHttps,
-        );
+        final accepted = await _httpClientManager
+            .promptForCertificateAcceptance(
+              context: context,
+              hostWithPort: ipAddress,
+              useHttps: useHttps,
+            );
 
         if (accepted && context.mounted) {
           // Create a new client and retry the login
-          final retryClient = _createHttpClient(useHttps, ipAddress, context: context);
+          final retryClient = _createHttpClient(
+            useHttps,
+            ipAddress,
+            context: context,
+          );
           try {
             final retryResponse = await retryClient.post(
               uri.toString(),
@@ -217,22 +305,28 @@ class RealApiService implements IApiService {
               options: Options(
                 contentType: Headers.formUrlEncodedContentType,
                 followRedirects: true,
-                validateStatus: (code) => code != null && code >= 200 && code < 400 || code == 302,
+                validateStatus: (code) =>
+                    code != null &&
+                    ((code >= 200 && code < 400) || code == 403),
               ),
             );
 
-            if (retryResponse.statusCode == 302 || retryResponse.statusCode == 200) {
-              final setCookies = retryResponse.headers.map['set-cookie'];
-              if (setCookies != null && setCookies.isNotEmpty) {
-                final cookies = setCookies.join(',').split(',');
-                for (final cookie in cookies) {
-                  if (cookie.contains('sysauth')) {
-                    final cookieValue = cookie.split(';')[0].split('=')[1];
-                    return cookieValue;
-                  }
-                }
+            if (retryResponse.statusCode == 302 ||
+                retryResponse.statusCode == 200) {
+              final cookie = LuciAuthProtocol.parseAuthCookie(
+                retryResponse.headers.map['set-cookie'],
+              );
+              if (cookie != null) {
+                _lastCookieName = cookie.name;
+                _lastLoginStatus = LuciLoginStatus.success;
+                return cookie.value;
               }
             }
+            _lastLoginStatus = LuciAuthProtocol.classifyLoginResponse(
+              statusCode: retryResponse.statusCode ?? 0,
+              headers: retryResponse.headers.map,
+              body: retryResponse.data?.toString() ?? '',
+            );
           } on DioException catch (retryError, retryStack) {
             Logger.exception('Login retry failed', retryError, retryStack);
           }
@@ -240,9 +334,11 @@ class RealApiService implements IApiService {
       }
 
       if (isCertError) {
+        _lastLoginStatus = LuciLoginStatus.connectionError;
         return null;
       }
 
+      _lastLoginStatus = LuciLoginStatus.connectionError;
       rethrow;
     }
   }
@@ -296,29 +392,60 @@ class RealApiService implements IApiService {
     Map<String, dynamic>? params,
     BuildContext? context,
   }) async {
-    final url = _buildUrl(ipAddress, useHttps, '/cgi-bin/luci/admin/ubus');
     final client = _createHttpClient(useHttps, ipAddress, context: context);
+    final routerKey = _routerKey(ipAddress, useHttps);
+    final session =
+        _sessions[routerKey] ??
+        LuciSession(
+          token: sysauth,
+          cookieName: useHttps ? 'sysauth_https' : 'sysauth_http',
+          useHttps: useHttps,
+        );
+    var endpoint = _rpcEndpoints[routerKey] ?? LuciRpcEndpoint.protected;
 
-    final rpcPayload = {
-      'jsonrpc': '2.0',
-      'id': 1,
-      'method': 'call',
-      'params': [sysauth, object, method, params ?? {}],
-    };
-
-    try {
-      final response = await client.post(
+    Future<Response<dynamic>> send(LuciRpcEndpoint target) {
+      final request = LuciAuthProtocol.rpcRequest(
+        session: session,
+        endpoint: target,
+        object: object,
+        method: method,
+        params: params,
+      );
+      final url = _buildUrl(ipAddress, useHttps, request.path);
+      return client.post(
         url.toString(),
-        data: jsonEncode(rpcPayload),
+        data: jsonEncode(request.body),
         options: Options(
-          headers: {'Content-Type': 'application/json'},
+          headers: request.headers,
+          validateStatus: (code) => code == 200 || code == 403 || code == 404,
         ),
       );
+    }
+
+    try {
+      var response = await send(endpoint);
+
+      // Older LuCI releases do not provide ubus2fa. Only an explicit 404 is
+      // treated as proof that the protected endpoint is unavailable. A 403
+      // always means the current session must be renewed and never downgrades.
+      if (LuciAuthProtocol.shouldFallbackToLegacy(
+        endpoint,
+        response.statusCode,
+      )) {
+        endpoint = LuciRpcEndpoint.legacy;
+        _rpcEndpoints[routerKey] = endpoint;
+        response = await send(endpoint);
+      } else if (response.statusCode == 200) {
+        _rpcEndpoints[routerKey] = endpoint;
+      }
 
       if (response.statusCode == 200) {
         final decoded = response.data is String
             ? jsonDecode(response.data as String)
             : response.data;
+        if (decoded is! Map<String, dynamic>) {
+          throw const FormatException('RPC 返回了无效的 JSON 数据');
+        }
         if (decoded['error'] != null) {
           throw Exception('RPC error: ${decoded['error']['message']}');
         }
@@ -331,8 +458,10 @@ class RealApiService implements IApiService {
           // Wrap single result in format: [0, data]
           return [0, result];
         }
+      } else if (response.statusCode == 403) {
+        throw Exception('LuCI 会话已过期，请重新登录。');
       } else {
-        throw Exception('Failed to call RPC: HTTP ${response.statusCode}');
+        throw Exception('RPC 调用失败：HTTP ${response.statusCode}');
       }
     } on DioException catch (e, stack) {
       Logger.exception('API call failed', e, stack);

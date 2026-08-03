@@ -272,13 +272,13 @@ class HttpClientManager {
                 color: Theme.of(context).colorScheme.error,
                 size: 32,
               ),
-              title: const Text('Certificate Warning'),
+              title: const Text('证书安全警告'),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'The certificate for $host is not trusted by your device. This could indicate a security risk.',
+                    '$host 的证书不受此设备信任，连接可能存在安全风险。',
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                   const SizedBox(height: 16),
@@ -305,7 +305,7 @@ class HttpClientManager {
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            'Only proceed if you trust this router and understand the security implications.',
+                            '仅在确认这是可信路由器并了解相关风险时继续。',
                             style: Theme.of(context).textTheme.bodySmall
                                 ?.copyWith(
                                   color: Theme.of(context).colorScheme.error,
@@ -320,7 +320,7 @@ class HttpClientManager {
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(dialogContext).pop(false),
-                  child: const Text('Cancel'),
+                  child: const Text('取消'),
                 ),
                 FilledButton(
                   onPressed: () => Navigator.of(dialogContext).pop(true),
@@ -328,7 +328,7 @@ class HttpClientManager {
                     backgroundColor: Theme.of(context).colorScheme.error,
                     foregroundColor: Theme.of(context).colorScheme.onError,
                   ),
-                  child: const Text('Accept Risk'),
+                  child: const Text('接受风险'),
                 ),
               ],
             ),
@@ -374,14 +374,14 @@ class CertificateWarningDialog extends StatelessWidget {
         color: colorScheme.error,
         size: 32,
       ),
-      title: const Text('Certificate Warning'),
+      title: const Text('证书安全警告'),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'The certificate for $host:$port is not trusted by your device. This could indicate a security risk.',
+              '$host:$port 的证书不受此设备信任，连接可能存在安全风险。',
               style: theme.textTheme.bodyMedium,
             ),
             const SizedBox(height: 16),
@@ -398,22 +398,22 @@ class CertificateWarningDialog extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Certificate Details:',
+                    '证书详情：',
                     style: theme.textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
                   ),
                   const SizedBox(height: 8),
-                  _buildCertDetail('Subject', certificate.subject),
-                  _buildCertDetail('Issuer', certificate.issuer),
+                  _buildCertDetail('主体', certificate.subject),
+                  _buildCertDetail('签发者', certificate.issuer),
                   _buildCertDetail(
-                    'Valid From',
+                    '生效时间',
                     certificate.startValidity.toLocal().toString().split(
                       '.',
                     )[0],
                   ),
                   _buildCertDetail(
-                    'Valid Until',
+                    '失效时间',
                     certificate.endValidity.toLocal().toString().split('.')[0],
                   ),
                 ],
@@ -435,7 +435,7 @@ class CertificateWarningDialog extends StatelessWidget {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Only proceed if you trust this router and understand the security implications.',
+                      '仅在确认这是可信路由器并了解相关风险时继续。',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: colorScheme.error,
                       ),
@@ -450,7 +450,7 @@ class CertificateWarningDialog extends StatelessWidget {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(false),
-          child: const Text('Cancel'),
+          child: const Text('取消'),
         ),
         FilledButton(
           onPressed: () => Navigator.of(context).pop(true),
@@ -458,7 +458,7 @@ class CertificateWarningDialog extends StatelessWidget {
             backgroundColor: colorScheme.error,
             foregroundColor: colorScheme.onError,
           ),
-          child: const Text('Accept Risk'),
+          child: const Text('接受风险'),
         ),
       ],
     );

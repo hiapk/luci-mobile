@@ -22,6 +22,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   final _ipController = TextEditingController();
   final _usernameController = TextEditingController(text: 'root');
   final _passwordController = TextEditingController();
+  final _otpController = TextEditingController();
   final _confirmationController = TextEditingController();
   bool _isCheckingAutoLogin = true;
   bool _passwordVisible = false;
@@ -90,25 +91,22 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       barrierDismissible: false,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Activate Reviewer Mode?'),
+          title: const Text('启用演示模式？'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'This will enable reviewer mode which bypasses authentication '
-                'and provides mock data for app demonstration purposes.',
-              ),
+              const Text('演示模式会跳过身份验证，并使用模拟数据展示应用功能。'),
               const SizedBox(height: 16),
               const Text(
-                'To confirm, type "REVIEWER" below:',
+                '请输入“REVIEWER”确认：',
                 style: TextStyle(fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 8),
               TextField(
                 controller: _confirmationController,
                 decoration: const InputDecoration(
-                  hintText: 'Type REVIEWER',
+                  hintText: '输入 REVIEWER',
                   border: OutlineInputBorder(),
                 ),
                 onChanged: (_) => setDialogState(() {}),
@@ -118,7 +116,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
+              child: const Text('取消'),
             ),
             FilledButton(
               onPressed: _confirmationController.text == 'REVIEWER'
@@ -127,7 +125,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                       _activateReviewerMode();
                     }
                   : null,
-              child: const Text('Activate'),
+              child: const Text('启用'),
             ),
           ],
         ),
@@ -149,6 +147,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     _ipController.dispose();
     _usernameController.dispose();
     _passwordController.dispose();
+    _otpController.dispose();
     _confirmationController.dispose();
     _logoAnimController.dispose();
     _progressAnimController.dispose();
@@ -161,6 +160,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     if (success && mounted) {
       unawaited(Navigator.of(context).pushReplacementNamed('/'));
     } else {
+      if (appState.requiresOtp) {
+        final credentials = await SecureStorageService().getCredentials();
+        if (!mounted) return;
+        final address = credentials['ipAddress'];
+        final username = credentials['username'];
+        final password = credentials['password'];
+        final useHttps = credentials['useHttps'] == 'true';
+        if (address != null) {
+          _ipController.text = '${useHttps ? 'https' : 'http'}://$address';
+        }
+        if (username != null) _usernameController.text = username;
+        if (password != null) _passwordController.text = password;
+      }
       if (mounted) {
         setState(() {
           _isCheckingAutoLogin = false;
@@ -175,13 +187,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       final input = _ipController.text.trim();
       final user = _usernameController.text;
       final pass = _passwordController.text;
+      final otp = _otpController.text;
 
       // Parse the input to extract host, port, and protocol
       final parsedUrl = UrlParser.parse(input);
 
       if (!parsedUrl.isValid) {
         // Show error message
-        appState.setError(parsedUrl.error ?? 'Invalid address format');
+        appState.setError(parsedUrl.error ?? '地址格式不正确');
         return;
       }
 
@@ -191,6 +204,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
         user,
         pass,
         parsedUrl.useHttps,
+        otp: otp,
         fromRouter: false,
         context: context,
       );
@@ -210,7 +224,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     if (!success && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('Could not open GitHub issues'),
+          content: const Text('无法打开 GitHub 问题页面'),
           backgroundColor: Theme.of(context).colorScheme.error,
         ),
       );
@@ -271,14 +285,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                               Column(
                                 children: [
                                   Text(
-                                    'LuCI Mobile',
+                                    'LuCI 路由助手',
                                     style: textTheme.headlineLarge?.copyWith(
                                       fontWeight: FontWeight.bold,
                                     ),
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
-                                    'Connect to your OpenWrt router',
+                                    '连接并管理 OpenWrt 路由器',
                                     style: textTheme.titleMedium?.copyWith(
                                       color: colorScheme.onSurface.withValues(
                                         alpha: 0.8,
@@ -287,7 +301,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                                   ),
                                   const SizedBox(height: 2),
                                   Text(
-                                    'Fast. Secure. Open Source.',
+                                    '快速、安全、开源',
                                     style: textTheme.bodySmall?.copyWith(
                                       color: colorScheme.primary,
                                     ),
@@ -306,7 +320,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                                             return Column(
                                               children: [
                                                 Text(
-                                                  'Hold to activate reviewer mode...',
+                                                  '长按以启用演示模式…',
                                                   style: textTheme.bodySmall
                                                       ?.copyWith(
                                                         color:
@@ -413,8 +427,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                                         mainAxisSize: MainAxisSize.min,
                                         children: <Widget>[
                                           Tooltip(
-                                            message:
-                                                'Enter the IP address, hostname, or full URL of your router',
+                                            message: '输入路由器 IP、主机名或完整网址',
                                             child: TextFormField(
                                               controller: _ipController,
                                               autofocus: true,
@@ -423,27 +436,27 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                                                 AutofillHints.username,
                                               ],
                                               decoration: const InputDecoration(
-                                                labelText: 'Router Address',
+                                                labelText: '路由器地址',
                                                 border: OutlineInputBorder(),
                                                 prefixIcon: Icon(
                                                   Icons.router_outlined,
                                                 ),
                                                 helperText:
-                                                    'e.g. 192.168.1.1, router.local:8080, https://192.168.1.1',
+                                                    '例如 192.168.1.1、router.local:8080 或完整网址',
                                               ),
                                               textInputAction:
                                                   TextInputAction.next,
                                               validator: (value) {
                                                 if (value == null ||
                                                     value.isEmpty) {
-                                                  return 'Please enter the router address';
+                                                  return '请输入路由器地址';
                                                 }
                                                 final parsed = UrlParser.parse(
                                                   value,
                                                 );
                                                 if (!parsed.isValid) {
                                                   return parsed.error ??
-                                                      'Invalid address format';
+                                                      '地址格式不正确';
                                                 }
                                                 return null;
                                               },
@@ -451,28 +464,26 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                                           ),
                                           const SizedBox(height: 10),
                                           Tooltip(
-                                            message:
-                                                'Enter your router username',
+                                            message: '输入路由器管理用户名',
                                             child: TextFormField(
                                               controller: _usernameController,
                                               autofillHints: const [
                                                 AutofillHints.username,
                                               ],
                                               decoration: const InputDecoration(
-                                                labelText: 'Username',
+                                                labelText: '用户名',
                                                 border: OutlineInputBorder(),
                                                 prefixIcon: Icon(
                                                   Icons.person_outline,
                                                 ),
-                                                helperText:
-                                                    'Default is usually root',
+                                                helperText: '默认通常为 root',
                                               ),
                                               textInputAction:
                                                   TextInputAction.next,
                                               validator: (value) {
                                                 if (value == null ||
                                                     value.isEmpty) {
-                                                  return 'Please enter the username';
+                                                  return '请输入用户名';
                                                 }
                                                 return null;
                                               },
@@ -480,8 +491,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                                           ),
                                           const SizedBox(height: 10),
                                           Tooltip(
-                                            message:
-                                                'Enter your router password',
+                                            message: '输入路由器管理密码',
                                             child: TextFormField(
                                               controller: _passwordController,
                                               obscureText: !_passwordVisible,
@@ -489,14 +499,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                                                 AutofillHints.password,
                                               ],
                                               decoration: InputDecoration(
-                                                labelText: 'Password',
+                                                labelText: '密码',
                                                 border:
                                                     const OutlineInputBorder(),
                                                 prefixIcon: const Icon(
                                                   Icons.lock_outline,
                                                 ),
-                                                helperText:
-                                                    'Your router password',
+                                                helperText: '路由器管理密码',
                                                 suffixIcon: IconButton(
                                                   icon: Icon(
                                                     _passwordVisible
@@ -510,13 +519,45 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                                                         !_passwordVisible,
                                                   ),
                                                   tooltip: _passwordVisible
-                                                      ? 'Hide password'
-                                                      : 'Show password',
+                                                      ? '隐藏密码'
+                                                      : '显示密码',
                                                 ),
                                               ),
                                               textInputAction:
-                                                  TextInputAction.done,
+                                                  TextInputAction.next,
                                             ),
+                                          ),
+                                          const SizedBox(height: 10),
+                                          TextFormField(
+                                            controller: _otpController,
+                                            keyboardType: TextInputType.number,
+                                            maxLength: 6,
+                                            autofillHints: const [
+                                              AutofillHints.oneTimeCode,
+                                            ],
+                                            decoration: const InputDecoration(
+                                              labelText: '两步验证码（可选）',
+                                              helperText:
+                                                  '启用 2FA 时输入验证器中的 6 位动态码',
+                                              border: OutlineInputBorder(),
+                                              prefixIcon: Icon(
+                                                Icons.pin_outlined,
+                                              ),
+                                              counterText: '',
+                                            ),
+                                            textInputAction:
+                                                TextInputAction.done,
+                                            onFieldSubmitted: (_) => _connect(),
+                                            validator: (value) {
+                                              final otp = value?.trim() ?? '';
+                                              if (otp.isNotEmpty &&
+                                                  !RegExp(
+                                                    r'^\d{6}$',
+                                                  ).hasMatch(otp)) {
+                                                return '请输入 6 位数字验证码';
+                                              }
+                                              return null;
+                                            },
                                           ),
                                           AnimatedSwitcher(
                                             duration: const Duration(
@@ -637,7 +678,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                                                         children: const [
                                                           Icon(Icons.login),
                                                           SizedBox(width: 12),
-                                                          Text('Connect'),
+                                                          Text('连接'),
                                                         ],
                                                       ),
                                               ),
@@ -654,13 +695,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                         ),
                         const SizedBox(height: 16),
                         Tooltip(
-                          message: 'Open GitHub issues for support',
+                          message: '打开 GitHub 问题页面获取支持',
                           child: TextButton(
                             onPressed: _openGitHubIssues,
                             style: TextButton.styleFrom(
                               foregroundColor: colorScheme.primary,
                             ),
-                            child: const Text('Need help?'),
+                            child: const Text('需要帮助？'),
                           ),
                         ),
                         FutureBuilder<PackageInfo>(

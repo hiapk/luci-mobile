@@ -14,15 +14,12 @@ class SettingsScreen extends ConsumerWidget {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Exit Reviewer Mode?'),
-        content: const Text(
-          'This will disable reviewer mode and return to normal authentication. '
-          'You will need to log in with real router credentials.',
-        ),
+        title: const Text('退出演示模式？'),
+        content: const Text('退出后将恢复正常身份验证，需要使用真实路由器凭据登录。'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
+            child: const Text('取消'),
           ),
           FilledButton(
             onPressed: () async {
@@ -37,7 +34,7 @@ class SettingsScreen extends ConsumerWidget {
                 );
               }
             },
-            child: const Text('Exit'),
+            child: const Text('退出'),
           ),
         ],
       ),
@@ -47,7 +44,7 @@ class SettingsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
-      appBar: const LuciAppBar(title: 'Settings', showBack: true),
+      appBar: const LuciAppBar(title: '设置', showBack: true),
       body: ListView(
         padding: const EdgeInsets.symmetric(vertical: 8.0),
         children: [
@@ -60,7 +57,7 @@ class SettingsScreen extends ConsumerWidget {
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 28, 16, 8),
                     child: Text(
-                      'Theme',
+                      '主题',
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.bold,
                       ),
@@ -74,15 +71,15 @@ class SettingsScreen extends ConsumerWidget {
                     child: Column(
                       children: [
                         RadioListTile<ThemeMode>(
-                          title: const Text('System Default'),
+                          title: const Text('跟随系统'),
                           value: ThemeMode.system,
                         ),
                         RadioListTile<ThemeMode>(
-                          title: const Text('Light'),
+                          title: const Text('浅色'),
                           value: ThemeMode.light,
                         ),
                         RadioListTile<ThemeMode>(
-                          title: const Text('Dark'),
+                          title: const Text('深色'),
                           value: ThemeMode.dark,
                         ),
                       ],
@@ -92,14 +89,17 @@ class SettingsScreen extends ConsumerWidget {
                   Padding(
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                     child: Text(
-                      'Dashboard',
+                      '概览',
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.bold,
                       ),
                     ),
                   ),
                   Card(
-                    margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    margin: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
                     elevation: 2,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
@@ -113,15 +113,17 @@ class SettingsScreen extends ConsumerWidget {
                         ),
                         child: Icon(
                           Icons.dashboard_customize,
-                          color: Theme.of(context).colorScheme.onPrimaryContainer,
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.onPrimaryContainer,
                           size: 24,
                         ),
                       ),
                       title: const Text(
-                        'Customize Dashboard',
+                        '自定义概览',
                         style: TextStyle(fontWeight: FontWeight.w600),
                       ),
-                      subtitle: const Text('Configure interface visibility and throughput monitoring'),
+                      subtitle: const Text('配置接口显示和速率监控'),
                       trailing: Icon(
                         Icons.arrow_forward_ios,
                         size: 16,
@@ -142,7 +144,7 @@ class SettingsScreen extends ConsumerWidget {
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                       child: Text(
-                        'Reviewer Mode',
+                        '演示模式',
                         style: Theme.of(context).textTheme.titleMedium
                             ?.copyWith(fontWeight: FontWeight.bold),
                       ),
@@ -152,9 +154,9 @@ class SettingsScreen extends ConsumerWidget {
                         Icons.info_outline,
                         color: Colors.orange,
                       ),
-                      title: const Text('Reviewer Mode Active'),
+                      title: const Text('演示模式已启用'),
                       subtitle: Text(
-                        'Mock data is being used for demonstration',
+                        '当前使用模拟数据进行演示',
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ),
@@ -167,7 +169,7 @@ class SettingsScreen extends ConsumerWidget {
                         onPressed: () =>
                             _showReviewerModeResetDialog(context, ref),
                         icon: const Icon(Icons.exit_to_app),
-                        label: const Text('Exit Reviewer Mode'),
+                        label: const Text('退出演示模式'),
                         style: FilledButton.styleFrom(
                           backgroundColor: Theme.of(context).colorScheme.error,
                           foregroundColor: Theme.of(

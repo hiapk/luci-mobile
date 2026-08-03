@@ -6,6 +6,7 @@ abstract class IAuthService {
     String username,
     String password,
     bool useHttps, {
+    String? otp,
     BuildContext? context,
   });
   Future<bool> tryAutoLogin(
@@ -26,4 +27,5 @@ abstract class IAuthService {
   String? get ipAddress;
   bool get useHttps;
   bool get isAuthenticated;
+  bool get requiresOtp;
 }

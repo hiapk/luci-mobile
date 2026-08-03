@@ -200,7 +200,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text('Model', style: labelStyle),
+                  Text('型号', style: labelStyle),
                   const SizedBox(height: 4),
                   Text(
                     model,
@@ -215,7 +215,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text('Version', style: labelStyle),
+                  Text('版本', style: labelStyle),
                   const SizedBox(height: 4),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -324,7 +324,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               padding: const EdgeInsets.only(top: 8.0),
               child: Center(
                 child: Text(
-                  'Throughput$throughputLabel',
+                  '实时速率$throughputLabel',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Theme.of(
                       context,
@@ -452,9 +452,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                             ),
                             const SizedBox(height: 8),
                             Text(
-                              isSwitchingRouter
-                                  ? 'Switching router...'
-                                  : 'Collecting throughput data...',
+                              isSwitchingRouter ? '正在切换路由器…' : '正在收集速率数据…',
                               style: Theme.of(context).textTheme.bodyMedium
                                   ?.copyWith(
                                     color: Theme.of(context)
@@ -676,21 +674,21 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             Expanded(
               child: _buildVitalsColumn(
                 context,
-                label: 'CPU Load',
+                label: 'CPU 负载',
                 value: cpuLoadValue,
               ),
             ),
             Expanded(
               child: _buildVitalsColumn(
                 context,
-                label: 'Memory',
+                label: '内存',
                 value: memoryValue,
               ),
             ),
             Expanded(
               child: _buildVitalsColumn(
                 context,
-                label: 'Uptime',
+                label: '运行时间',
                 value: uptimeValue,
               ),
             ),
@@ -777,7 +775,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                   const SizedBox(width: 4),
                   Flexible(
                     child: Text(
-                      'Ch: $channel',
+                      '信道：$channel',
                       style: textTheme.bodySmall,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -1180,7 +1178,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                             ),
                             const SizedBox(width: 1),
                             Text(
-                              isUp ? 'UP' : 'DOWN',
+                              isUp ? '已连接' : '已断开',
                               style: TextStyle(
                                 fontWeight: FontWeight.bold,
                                 color: isUp
@@ -1320,7 +1318,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     final hostname = boardInfo?['hostname']?.toString();
     final headerText = (hostname != null && hostname.isNotEmpty)
         ? hostname
-        : (selected?.ipAddress ?? 'Loading...');
+        : (selected?.ipAddress ?? '加载中…');
     return Scaffold(
       appBar: LuciAppBar(
         centerTitle: true,
@@ -1391,7 +1389,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                                       ),
                                       child: Center(
                                         child: Text(
-                                          'Select Router',
+                                          '选择路由器',
                                           style: Theme.of(context)
                                               .textTheme
                                               .titleMedium
@@ -1436,7 +1434,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                                         ),
                                         title: Tooltip(
                                           message: isStale
-                                              ? 'Last known hostname (may be out of date)'
+                                              ? '上次记录的主机名（可能已过期）'
                                               : '',
                                           child: Text(
                                             routerTitle,
@@ -1555,10 +1553,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   Widget _buildBody(AppState appState) {
     if (appState.dashboardError != null) {
       return LuciErrorDisplay(
-        title: 'Connection Failed',
-        message:
-            'Unable to connect to the router. Please check your network connection and router settings.',
-        actionLabel: 'Retry Connection',
+        title: '连接失败',
+        message: '无法连接路由器，请检查网络连接和路由器设置。',
+        actionLabel: '重新连接',
         onAction: () => appState.fetchDashboardData(),
         icon: Icons.wifi_off_rounded,
       );
@@ -1570,11 +1567,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
     if (appState.dashboardData == null) {
       return LuciEmptyState(
-        title: 'No Data Available',
-        message:
-            'Unable to fetch dashboard data. Pull down to refresh or tap the button below.',
+        title: '暂无数据',
+        message: '无法获取概览数据，请下拉刷新或点击下方按钮。',
         icon: Icons.dashboard_outlined,
-        actionLabel: 'Fetch Data',
+        actionLabel: '获取数据',
         onAction: () => appState.fetchDashboardData(),
       );
     }

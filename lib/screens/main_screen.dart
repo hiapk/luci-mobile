@@ -129,7 +129,7 @@ class _MainScreenState extends ConsumerState<MainScreen> {
                   opacity: getTabOpacity(0),
                   child: Icon(Icons.dashboard_outlined, color: getTabColor(0)),
                 ),
-                label: 'Dashboard',
+                label: '概览',
               ),
               NavigationDestination(
                 selectedIcon: Opacity(
@@ -140,7 +140,7 @@ class _MainScreenState extends ConsumerState<MainScreen> {
                   opacity: getTabOpacity(1),
                   child: Icon(Icons.people_outline, color: getTabColor(1)),
                 ),
-                label: 'Clients',
+                label: '设备',
               ),
               NavigationDestination(
                 selectedIcon: Opacity(
@@ -151,7 +151,7 @@ class _MainScreenState extends ConsumerState<MainScreen> {
                   opacity: getTabOpacity(2),
                   child: Icon(Icons.lan_outlined, color: getTabColor(2)),
                 ),
-                label: 'Interfaces',
+                label: '接口',
               ),
               NavigationDestination(
                 selectedIcon: Opacity(
@@ -162,7 +162,7 @@ class _MainScreenState extends ConsumerState<MainScreen> {
                   opacity: getTabOpacity(3),
                   child: Icon(Icons.more_horiz_outlined),
                 ),
-                label: 'More',
+                label: '更多',
               ),
             ],
           );

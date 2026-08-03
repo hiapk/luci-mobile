@@ -101,7 +101,7 @@ class _LuciPullToRefreshState extends State<LuciPullToRefresh>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Refresh failed: ${e.toString()}'),
+            content: Text('刷新失败：${e.toString()}'),
             backgroundColor: Theme.of(context).colorScheme.error,
             behavior: SnackBarBehavior.floating,
             margin: EdgeInsets.all(LuciSpacing.md),

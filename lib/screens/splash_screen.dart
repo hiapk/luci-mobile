@@ -87,7 +87,7 @@ class _SplashScreenState extends State<SplashScreen>
               ),
               const SizedBox(height: 32),
               Text(
-                'LuCI Mobile',
+                'LuCI 路由助手',
                 style: theme.textTheme.headlineLarge?.copyWith(
                   color: colorScheme.onPrimaryContainer,
                   fontWeight: FontWeight.bold,
@@ -96,7 +96,7 @@ class _SplashScreenState extends State<SplashScreen>
               ),
               const SizedBox(height: 8),
               Text(
-                'OpenWrt Router Control',
+                'OpenWrt 路由管理',
                 style: theme.textTheme.titleMedium?.copyWith(
                   color: colorScheme.onPrimaryContainer.withValues(alpha: 0.8),
                   fontWeight: FontWeight.w500,

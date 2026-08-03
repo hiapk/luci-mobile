@@ -38,7 +38,7 @@ class LuciAppBar extends StatelessWidget implements PreferredSizeWidget {
                 color: theme.colorScheme.onSurface,
               ),
               onPressed: () => Navigator.of(context).maybePop(),
-              tooltip: 'Back',
+              tooltip: '返回',
             )
           : null,
       title:
@@ -154,7 +154,7 @@ class LuciErrorDisplay extends StatelessWidget {
                 ElevatedButton.icon(
                   onPressed: onAction,
                   icon: const Icon(Icons.refresh_rounded),
-                  label: Text(actionLabel ?? 'Retry'),
+                  label: Text(actionLabel ?? '重试'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: colorScheme.primary,
                     foregroundColor: colorScheme.onPrimary,
@@ -227,7 +227,7 @@ class LuciEmptyState extends StatelessWidget {
               ElevatedButton.icon(
                 onPressed: onAction,
                 icon: const Icon(Icons.add_rounded),
-                label: Text(actionLabel ?? 'Add'),
+                label: Text(actionLabel ?? '添加'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: colorScheme.primary,
                   foregroundColor: colorScheme.onPrimary,
