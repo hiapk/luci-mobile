@@ -521,7 +521,7 @@ class AppState extends ChangeNotifier {
         'work_mode': values['work_mode'] ?? 0,
         'record_enable': values['record_enable'] ?? 0,
       },
-      context: context,
+      context: context?.mounted == true ? context : null,
     );
   }
 
@@ -566,9 +566,13 @@ class AppState extends ChangeNotifier {
       'uci',
       'commit',
       params: {'config': 'hd-idle'},
-      context: context,
+      context: context?.mounted == true ? context : null,
     );
-    await controlStartupService('hd-idle', 'restart', context: context);
+    await controlStartupService(
+      'hd-idle',
+      'restart',
+      context: context?.mounted == true ? context : null,
+    );
   }
 
   Future<Map<String, dynamic>> fetchHomeAssistantOverview({
@@ -587,12 +591,12 @@ class AppState extends ChangeNotifier {
         _execFile(
           '/usr/libexec/istorec/homeassistant.sh',
           const ['status'],
-          context: context,
+          context: context?.mounted == true ? context : null,
         ),
         _execFile(
           '/usr/libexec/istorec/homeassistant.sh',
           const ['port'],
-          context: context,
+          context: context?.mounted == true ? context : null,
         ),
       ]);
       status = results[0]['stdout']?.toString().trim() ?? '';
