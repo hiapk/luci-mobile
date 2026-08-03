@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:luci_mobile/models/luci_menu_item.dart';
+import 'package:luci_mobile/services/luci_navigation_policy.dart';
 import 'package:luci_mobile/utils/http_client_manager.dart';
 
 class LuciMenuService {
@@ -58,7 +59,7 @@ class LuciMenuService {
       if (item != null) items.add(item);
     }
     items.sort(_compareItems);
-    return items;
+    return LuciNavigationPolicy.filterVisibleRoots(items);
   }
 
   LuciMenuItem? _parseNode(
@@ -136,11 +137,21 @@ class LuciMenuService {
       'vpn': 'VPN',
       'overview': '概览',
       'routes': '路由表',
+      'iptables': '防火墙状态',
+      'nftables': '防火墙状态',
       'logs': '系统日志',
       'processes': '进程',
       'realtime': '实时信息',
+      'channel_analysis': '信道分析',
+      'bandwidth': '带宽',
+      'connections': '连接',
       'wireguard': 'WireGuard',
       'admin': '管理权',
+      'password': '路由器密码',
+      'dropbear': 'SSH 访问',
+      'sshkeys': 'SSH 密钥',
+      'uhttpd': 'HTTP(S) 访问',
+      'repokeys': '软件源公钥',
       'startup': '启动项',
       'crontab': '计划任务',
       'mounts': '挂载点',
@@ -158,6 +169,16 @@ class LuciMenuService {
       'networks': '网络',
       'volumes': '存储卷',
       'events': '事件',
+      'package-manager': '软件包',
+      'ddns': '动态 DNS',
+      'hd_idle': '硬盘休眠',
+      'appfilter': '应用过滤',
+      'linkease': '易有云文件管理器',
+      'homeassistant': 'Home Assistant',
+      'openclash': 'OpenClash',
+      'config': '配置',
+      'tool': '工具',
+      'console': '控制台',
     };
     const byTitle = <String, String>{
       'Status': '状态',
@@ -166,6 +187,9 @@ class LuciMenuService {
       'Network': '网络',
       'Overview': '概览',
       'Routes': '路由表',
+      'Routing': '路由表',
+      'Realtime Graphs': '实时信息',
+      'Channel Analysis': '信道分析',
       'System Log': '系统日志',
       'Kernel Log': '内核日志',
       'Processes': '进程',
@@ -179,6 +203,10 @@ class LuciMenuService {
       'DHCP and DNS': 'DHCP/DNS',
       'Diagnostics': '诊断',
       'Firewall': '防火墙',
+      'Software': '软件包',
+      'Dynamic DNS': '动态 DNS',
+      'HDD Idle': '硬盘休眠',
+      'App Filter': '应用过滤',
     };
     return byKey[key] ?? byTitle[title] ?? title;
   }

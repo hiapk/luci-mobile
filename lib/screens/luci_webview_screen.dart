@@ -254,23 +254,7 @@ class _LuciWebViewScreenState extends ConsumerState<LuciWebViewScreen> {
       context,
     );
     return CupertinoPageScaffold(
-      navigationBar: CupertinoNavigationBar(
-        previousPageTitle: 'LuCI',
-        middle: Text(
-          widget.title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        trailing: _progress < 100
-            ? const CupertinoActivityIndicator(radius: 9)
-            : CupertinoButton(
-                padding: EdgeInsets.zero,
-                onPressed: () => _controller.reload(),
-                child: const Icon(CupertinoIcons.refresh, size: 21),
-              ),
-      ),
       child: SafeArea(
-        top: false,
         child: Column(
           children: [
             if (_progress > 0 && _progress < 100)
@@ -332,6 +316,11 @@ class _LuciWebViewScreenState extends ConsumerState<LuciWebViewScreen> {
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
                     _WebToolbarButton(
+                      label: '关闭',
+                      icon: CupertinoIcons.xmark,
+                      onPressed: () => Navigator.of(context).pop(),
+                    ),
+                    _WebToolbarButton(
                       label: '后退',
                       icon: CupertinoIcons.chevron_back,
                       onPressed: _canGoBack ? _controller.goBack : null,
@@ -346,11 +335,17 @@ class _LuciWebViewScreenState extends ConsumerState<LuciWebViewScreen> {
                       icon: CupertinoIcons.refresh,
                       onPressed: _controller.reload,
                     ),
-                    _WebToolbarButton(
-                      label: '在浏览器中打开',
-                      icon: CupertinoIcons.arrow_up_right_square,
-                      onPressed: _openExternally,
-                    ),
+                    if (_progress < 100)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 18),
+                        child: CupertinoActivityIndicator(radius: 9),
+                      )
+                    else
+                      _WebToolbarButton(
+                        label: '在浏览器中打开',
+                        icon: CupertinoIcons.arrow_up_right_square,
+                        onPressed: _openExternally,
+                      ),
                   ],
                 ),
               ),
@@ -380,9 +375,14 @@ class _WebToolbarButton extends StatelessWidget {
       button: true,
       enabled: onPressed != null,
       child: CupertinoButton(
-        padding: const EdgeInsets.symmetric(horizontal: 18),
+        minimumSize: const Size.square(44),
+        padding: EdgeInsets.zero,
         onPressed: onPressed,
-        child: Icon(icon, size: 22),
+        child: SizedBox(
+          width: 48,
+          height: 44,
+          child: Icon(icon, size: 22),
+        ),
       ),
     );
   }

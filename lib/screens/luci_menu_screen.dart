@@ -1,9 +1,14 @@
+import 'dart:async';
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:luci_mobile/main.dart';
 import 'package:luci_mobile/models/luci_menu_item.dart';
+import 'package:luci_mobile/screens/luci_native_screens.dart';
 import 'package:luci_mobile/screens/luci_webview_screen.dart';
+import 'package:luci_mobile/screens/router_tools_screen.dart';
 import 'package:luci_mobile/services/luci_menu_service.dart';
+import 'package:luci_mobile/services/luci_navigation_policy.dart';
 import 'package:luci_mobile/state/app_state.dart';
 
 class LuciMenuScreen extends ConsumerStatefulWidget {
@@ -47,6 +52,60 @@ class _LuciMenuScreenState extends ConsumerState<LuciMenuScreen> {
   }
 
   Future<void> _openItem(AppState appState, LuciMenuItem item) async {
+    final destination = LuciNavigationPolicy.nativeDestinationFor(item);
+    if (destination == LuciNativeDestination.dashboard) {
+      appState.requestTab(0);
+      return;
+    }
+    if (destination == LuciNativeDestination.interfaces) {
+      appState.requestTab(2);
+      return;
+    }
+    if (destination != null) {
+      final page = _nativePage(appState, item, destination);
+      if (page != null && mounted) {
+        await Navigator.of(
+          context,
+        ).push(CupertinoPageRoute<void>(builder: (_) => page));
+        return;
+      }
+    }
+    await _openWebView(appState, item);
+  }
+
+  Widget? _nativePage(
+    AppState appState,
+    LuciMenuItem item,
+    LuciNativeDestination destination,
+  ) {
+    void openAdvanced() {
+      unawaited(_openWebView(appState, item));
+    }
+
+    return switch (destination) {
+      LuciNativeDestination.logs => const RouterLogsScreen(),
+      LuciNativeDestination.processes => const RouterProcessesScreen(),
+      LuciNativeDestination.startupServices =>
+        const RouterStartupServicesScreen(),
+      LuciNativeDestination.routes => const RouterRoutesScreen(),
+      LuciNativeDestination.realtime => const RouterRealtimeScreen(),
+      LuciNativeDestination.diagnostics => const RouterDiagnosticsScreen(),
+      LuciNativeDestination.appFilter => AppFilterNativeScreen(
+        onOpenAdvanced: openAdvanced,
+      ),
+      LuciNativeDestination.hddIdle => HddIdleNativeScreen(
+        onOpenAdvanced: openAdvanced,
+      ),
+      LuciNativeDestination.homeAssistant => HomeAssistantNativeScreen(
+        onOpenAdvanced: openAdvanced,
+      ),
+      LuciNativeDestination.reboot => const RouterRebootScreen(),
+      LuciNativeDestination.dashboard => null,
+      LuciNativeDestination.interfaces => null,
+    };
+  }
+
+  Future<void> _openWebView(AppState appState, LuciMenuItem item) async {
     final router = appState.selectedRouter;
     final token = appState.sysauth;
     final cookieName = appState.authCookieName;
@@ -214,7 +273,12 @@ class _LuciMenuScreenState extends ConsumerState<LuciMenuScreen> {
                             ),
                             title: Text(item.title),
                             trailing: const CupertinoListTileChevron(),
-                            onTap: item.children.isEmpty
+                            onTap:
+                                item.children.isEmpty ||
+                                    LuciNavigationPolicy.nativeDestinationFor(
+                                          item,
+                                        ) !=
+                                        null
                                 ? () => _openItem(appState, item)
                                 : () => _openSubmenu(appState, item),
                           ),

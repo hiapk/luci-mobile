@@ -56,11 +56,6 @@ class AppState extends ChangeNotifier {
   ThemeMode _themeMode = ThemeMode.system;
   static const String _themeModeKey = 'themeMode';
 
-  // Clients view mode (aggregate across routers)
-  bool _clientsAggregateAllRouters = true;
-  static const String _clientsAggregateKey = 'clients_aggregate_all';
-  bool get clientsAggregateAllRouters => _clientsAggregateAllRouters;
-
   // Dashboard preferences state
   DashboardPreferences _dashboardPreferences = DashboardPreferences();
   DashboardPreferences get dashboardPreferences => _dashboardPreferences;
@@ -94,7 +89,6 @@ class AppState extends ChangeNotifier {
     await _loadThemeMode();
     await loadRouters(); // Load routers on app start (sets selectedRouter)
     await _migrateGlobalDashboardPreferencesIfNeeded(); // Proactively migrate legacy prefs
-    await _loadClientsViewMode();
     await loadDashboardPreferences(); // Load prefs scoped to selected router
   }
 
@@ -196,24 +190,6 @@ class AppState extends ChangeNotifier {
   Future<void> setThemeMode(ThemeMode mode) async {
     _themeMode = mode;
     await _secureStorageService.writeValue(_themeModeKey, mode.name);
-    notifyListeners();
-  }
-
-  Future<void> _loadClientsViewMode() async {
-    final stored = await _secureStorageService.readValue(_clientsAggregateKey);
-    if (stored == 'true') {
-      _clientsAggregateAllRouters = true;
-    } else if (stored == 'false') {
-      _clientsAggregateAllRouters = false;
-    }
-  }
-
-  Future<void> setClientsAggregateAllRouters(bool aggregate) async {
-    _clientsAggregateAllRouters = aggregate;
-    await _secureStorageService.writeValue(
-      _clientsAggregateKey,
-      aggregate.toString(),
-    );
     notifyListeners();
   }
 
@@ -405,6 +381,248 @@ class AppState extends ChangeNotifier {
     if (result is! List || result.isEmpty || result.first != 0) {
       throw Exception('服务操作失败。');
     }
+  }
+
+  Future<Map<String, List<String>>> fetchRoutingTables({
+    BuildContext? context,
+  }) async {
+    final results = await Future.wait([
+      _execFile('/sbin/ip', const [
+        '-4',
+        'route',
+        'show',
+        'table',
+        'all',
+      ], context: context),
+      _execFile('/sbin/ip', const [
+        '-6',
+        'route',
+        'show',
+        'table',
+        'all',
+      ], context: context),
+    ]);
+    return {
+      'IPv4': const LineSplitter()
+          .convert(results[0]['stdout']?.toString() ?? '')
+          .where((line) => line.trim().isNotEmpty)
+          .toList(),
+      'IPv6': const LineSplitter()
+          .convert(results[1]['stdout']?.toString() ?? '')
+          .where((line) => line.trim().isNotEmpty)
+          .toList(),
+    };
+  }
+
+  Future<Map<String, dynamic>> fetchRealtimeOverview({
+    BuildContext? context,
+  }) async {
+    final results = await Future.wait([
+      _callCurrentRouter(
+        'luci',
+        'getRealtimeStats',
+        params: {'mode': 'load'},
+        context: context,
+      ),
+      _callCurrentRouter(
+        'luci',
+        'getRealtimeStats',
+        params: {'mode': 'connections'},
+        context: context,
+      ),
+    ]);
+
+    List<dynamic> samples(dynamic result) {
+      final data = _rpcDataMap(result)?['result'];
+      return data is List ? data : const [];
+    }
+
+    final loadSamples = samples(results[0]);
+    final connectionSamples = samples(results[1]);
+    return {
+      'load': loadSamples.isEmpty ? null : loadSamples.last,
+      'connections': connectionSamples.isEmpty ? null : connectionSamples.last,
+      'rxRate': currentRxRate,
+      'txRate': currentTxRate,
+    };
+  }
+
+  Future<String> runNetworkDiagnostic(
+    String operation,
+    String target, {
+    BuildContext? context,
+  }) async {
+    final normalizedTarget = target.trim();
+    if (!RegExp(
+      r'^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,252}$',
+    ).hasMatch(normalizedTarget)) {
+      throw const FormatException('请输入有效的主机名或 IP 地址。');
+    }
+
+    final command = switch (operation) {
+      'ping' => '/bin/ping',
+      'traceroute' => '/bin/traceroute',
+      'nslookup' => '/usr/bin/nslookup',
+      _ => throw ArgumentError.value(operation, 'operation'),
+    };
+    final params = switch (operation) {
+      'ping' => ['-4', '-c', '5', '-W', '1', normalizedTarget],
+      'traceroute' => ['-4', '-q', '1', '-w', '1', '-n', normalizedTarget],
+      'nslookup' => [normalizedTarget],
+      _ => <String>[],
+    };
+    final result = await _execFile(command, params, context: context);
+    final output = result['stdout']?.toString() ?? '';
+    final error = result['stderr']?.toString() ?? '';
+    return [output.trim(), error.trim()]
+        .where((part) => part.isNotEmpty)
+        .join('\n');
+  }
+
+  Future<Map<String, dynamic>> fetchAppFilterOverview({
+    BuildContext? context,
+  }) async {
+    final results = await Future.wait([
+      _callCurrentRouter(
+        'appfilter',
+        'get_oaf_status',
+        context: context,
+      ),
+      _callCurrentRouter('appfilter', 'dev_list', context: context),
+      _callCurrentRouter(
+        'appfilter',
+        'get_app_filter_base',
+        context: context,
+      ),
+    ]);
+    return {
+      'status': _rpcDataMap(results[0])?['data'] ?? const {},
+      'devices': _rpcDataMap(results[1])?['devlist'] ?? const [],
+      'base': _rpcDataMap(results[2])?['data'] ?? const {},
+    };
+  }
+
+  Future<void> setAppFilterEnabled(
+    bool enabled, {
+    BuildContext? context,
+  }) async {
+    final baseResult = await _callCurrentRouter(
+      'appfilter',
+      'get_app_filter_base',
+      context: context,
+    );
+    final base = _rpcDataMap(baseResult)?['data'];
+    final values = base is Map ? base : const {};
+    await _callCurrentRouter(
+      'appfilter',
+      'set_app_filter_base',
+      params: {
+        'enable': enabled ? 1 : 0,
+        'work_mode': values['work_mode'] ?? 0,
+        'record_enable': values['record_enable'] ?? 0,
+      },
+      context: context,
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> fetchHddIdleSettings({
+    BuildContext? context,
+  }) async {
+    final result = await _callCurrentRouter(
+      'uci',
+      'get',
+      params: {'config': 'hd-idle'},
+      context: context,
+    );
+    final values = _rpcDataMap(result)?['values'];
+    if (values is! Map) return [];
+    return values.values
+        .whereType<Map>()
+        .map(
+          (entry) => entry.map(
+            (key, value) => MapEntry(key.toString(), value),
+          ),
+        )
+        .where((entry) => entry['.type'] == 'hd-idle')
+        .toList();
+  }
+
+  Future<void> setHddIdleEnabled(
+    String section,
+    bool enabled, {
+    BuildContext? context,
+  }) async {
+    await _callCurrentRouter(
+      'uci',
+      'set',
+      params: {
+        'config': 'hd-idle',
+        'section': section,
+        'values': {'enabled': enabled ? '1' : '0'},
+      },
+      context: context,
+    );
+    await _callCurrentRouter(
+      'uci',
+      'commit',
+      params: {'config': 'hd-idle'},
+      context: context,
+    );
+    await controlStartupService('hd-idle', 'restart', context: context);
+  }
+
+  Future<Map<String, dynamic>> fetchHomeAssistantOverview({
+    BuildContext? context,
+  }) async {
+    final configResult = await _callCurrentRouter(
+      'uci',
+      'get',
+      params: {'config': 'homeassistant'},
+      context: context,
+    );
+    var status = '';
+    var port = 8123;
+    try {
+      final results = await Future.wait([
+        _execFile(
+          '/usr/libexec/istorec/homeassistant.sh',
+          const ['status'],
+          context: context,
+        ),
+        _execFile(
+          '/usr/libexec/istorec/homeassistant.sh',
+          const ['port'],
+          context: context,
+        ),
+      ]);
+      status = results[0]['stdout']?.toString().trim() ?? '';
+      port = int.tryParse(results[1]['stdout']?.toString().trim() ?? '') ?? 8123;
+    } catch (_) {
+      // Older iStoreOS builds do not grant RPC access to the helper script.
+    }
+    final values = _rpcDataMap(configResult)?['values'];
+    final configs = values is Map
+        ? values.values.whereType<Map>().toList()
+        : const <Map>[];
+    return {
+      'config': configs.isEmpty ? const {} : configs.first,
+      'status': status,
+      'port': port,
+    };
+  }
+
+  Future<Map<String, dynamic>> _execFile(
+    String command,
+    List<String> params, {
+    BuildContext? context,
+  }) async {
+    final result = await _callCurrentRouter(
+      'file',
+      'exec',
+      params: {'command': command, 'params': params},
+      context: context,
+    );
+    return _rpcDataMap(result) ?? const {};
   }
 
   Future<void> disconnectWirelessClient(
@@ -653,10 +871,9 @@ class AppState extends ChangeNotifier {
             );
           }
         }
-        await fetchDashboardData();
-        _startThroughputTimer();
         _isLoading = false;
         notifyListeners();
+        _loadDashboardAfterLogin();
         return true;
       } else {
         _errorMessage = requiresOtp
@@ -686,6 +903,13 @@ class AppState extends ChangeNotifier {
     _cancelThroughputTimer();
     // Optionally, do not clear routers or selectedRouter
     notifyListeners();
+  }
+
+  void _loadDashboardAfterLogin() {
+    unawaited(() async {
+      await fetchDashboardData();
+      if (isAuthenticated) _startThroughputTimer();
+    }());
   }
 
   Future<void> fetchDashboardData() async {
@@ -1526,8 +1750,7 @@ class AppState extends ChangeNotifier {
       );
       if (success) {
         _synchronizeApiSession();
-        await fetchDashboardData();
-        _startThroughputTimer();
+        _loadDashboardAfterLogin();
       }
       return success;
     }
@@ -1545,8 +1768,7 @@ class AppState extends ChangeNotifier {
     if (success) {
       await _synchronizeSelectedRouterProtocol();
       _synchronizeApiSession();
-      await fetchDashboardData();
-      _startThroughputTimer();
+      _loadDashboardAfterLogin();
     } else if (requiresOtp) {
       _errorMessage = '此路由器已启用两步验证，请输入 6 位验证码。';
       notifyListeners();
@@ -1595,72 +1817,6 @@ class AppState extends ChangeNotifier {
     _pollAttempts = 0;
     _isRebooting = false;
     super.dispose();
-  }
-
-  /// Aggregates DHCP leases across all configured routers and classifies clients
-  /// as wireless if their MAC appears in any router's associated stations list.
-  Future<List<Client>> fetchAggregatedClients() async {
-    try {
-      // Build a union of wireless MACs across all routers
-      final wirelessMacs = await fetchAllAssociatedWirelessMacsAggregated();
-      final normalizedWireless = wirelessMacs
-          .map((m) => m.toUpperCase().replaceAll('-', ':'))
-          .toSet();
-
-      // Aggregate leases across routers
-      final leases = await fetchAggregatedDhcpLeases();
-
-      // Convert to Client models with connection type
-      final clients = <String, Client>{}; // key by normalized MAC
-      for (final lease in leases) {
-        final client = Client.fromLease(lease);
-        final macNorm = client.macAddress.toUpperCase().replaceAll('-', ':');
-        final isWireless = normalizedWireless.contains(macNorm);
-        // If confirmed wireless by assoclist, mark wireless; otherwise keep heuristic
-        final enriched = isWireless
-            ? client.copyWith(connectionType: ConnectionType.wireless)
-            : client;
-        // Prefer entries that have more info (hostname length as heuristic)
-        if (!clients.containsKey(macNorm) ||
-            (enriched.hostname.isNotEmpty &&
-                enriched.hostname.length >
-                    (clients[macNorm]?.hostname.length ?? 0))) {
-          clients[macNorm] = enriched;
-        }
-      }
-
-      // Add wireless stations not in DHCP leases (AP-mode fallback)
-      for (final mac in normalizedWireless) {
-        if (!clients.containsKey(mac)) {
-          clients[mac] = Client.fromWirelessStation(mac);
-        }
-      }
-
-      // Sort: wireless > wired > unknown, then by hostname
-      final list = clients.values.toList();
-      list.sort((a, b) {
-        int typeOrder(ConnectionType t) {
-          switch (t) {
-            case ConnectionType.wireless:
-              return 0;
-            case ConnectionType.wired:
-              return 1;
-            default:
-              return 2;
-          }
-        }
-
-        final cmpType = typeOrder(
-          a.connectionType,
-        ).compareTo(typeOrder(b.connectionType));
-        if (cmpType != 0) return cmpType;
-        return a.hostname.toLowerCase().compareTo(b.hostname.toLowerCase());
-      });
-      return list;
-    } catch (e, stack) {
-      Logger.exception('Failed to aggregate clients', e, stack);
-      return [];
-    }
   }
 
   /// Returns clients for the currently selected router only
@@ -1786,7 +1942,7 @@ class AppState extends ChangeNotifier {
 
       final clients = clientMap.values.toList();
 
-      // Sort similar to aggregated
+      // Keep active wireless clients ahead of wired and unknown devices.
       clients.sort((a, b) {
         int typeOrder(ConnectionType t) {
           switch (t) {
@@ -1808,132 +1964,6 @@ class AppState extends ChangeNotifier {
       return clients;
     } catch (e, stack) {
       Logger.exception('Failed to fetch clients for selected router', e, stack);
-      return [];
-    }
-  }
-
-  /// Returns a union set of associated wireless MAC addresses across all routers
-  Future<Set<String>> fetchAllAssociatedWirelessMacsAggregated() async {
-    try {
-      if (_reviewerModeEnabled) {
-        final stationsMap = await _apiService!.fetchAssociatedStations();
-        final macs = <String>{};
-        stationsMap.forEach((_, stations) {
-          macs.addAll(stations.map((m) => m.toLowerCase()));
-        });
-        return macs;
-      }
-
-      final routers = _routerService?.routers ?? const <model.Router>[];
-      if (routers.isEmpty) return {};
-
-      final tasks = routers.map((r) async {
-        try {
-          if (_apiService is RealApiService) {
-            final real = _apiService as RealApiService;
-            final res = await real.loginWithProtocolDetection(
-              r.ipAddress,
-              r.username,
-              r.password,
-              r.useHttps,
-            );
-            if (res.token == null) return <String>{};
-            final map = await _apiService!
-                .fetchAllAssociatedWirelessMacsWithContext(
-                  ipAddress: r.ipAddress,
-                  sysauth: res.token!,
-                  useHttps: res.actualUseHttps,
-                );
-            final set = <String>{};
-            map.forEach((_, stations) {
-              set.addAll(stations.map((m) => m.toLowerCase()));
-            });
-            return set;
-          }
-        } catch (e) {
-          // Skip router on failure
-        }
-        return <String>{};
-      }).toList();
-
-      final results = await Future.wait(tasks);
-      return results.fold<Set<String>>(<String>{}, (acc, s) => acc..addAll(s));
-    } catch (e, stack) {
-      Logger.exception('Failed to aggregate wireless MACs', e, stack);
-      return {};
-    }
-  }
-
-  /// Returns a combined list of DHCP lease maps from all routers
-  Future<List<Map<String, dynamic>>> fetchAggregatedDhcpLeases() async {
-    try {
-      if (_reviewerModeEnabled) {
-        // Use mock data
-        final result = await _apiService!.callSimple(
-          'luci-rpc',
-          'getDHCPLeases',
-          {},
-        );
-        if (result is List && result.length > 1 && result[0] == 0) {
-          final data = result[1] as Map<String, dynamic>;
-          final leases = (data['dhcp_leases'] as List<dynamic>? ?? [])
-              .cast<Map<String, dynamic>>();
-          return leases;
-        }
-        return [];
-      }
-
-      final routers = _routerService?.routers ?? const <model.Router>[];
-      if (routers.isEmpty) return [];
-
-      final tasks = routers.map((r) async {
-        try {
-          if (_apiService is RealApiService) {
-            final real = _apiService as RealApiService;
-            final res = await real.loginWithProtocolDetection(
-              r.ipAddress,
-              r.username,
-              r.password,
-              r.useHttps,
-            );
-            if (res.token == null) return <Map<String, dynamic>>[];
-            final callRes = await _apiService!.call(
-              r.ipAddress,
-              res.token!,
-              res.actualUseHttps,
-              object: 'luci-rpc',
-              method: 'getDHCPLeases',
-              params: {},
-            );
-            if (callRes is List && callRes.length > 1 && callRes[0] == 0) {
-              final data = callRes[1] as Map<String, dynamic>;
-              final leases = (data['dhcp_leases'] as List<dynamic>? ?? [])
-                  .cast<Map<String, dynamic>>();
-              return leases;
-            }
-          }
-        } catch (e) {
-          // Skip router on failure
-        }
-        return <Map<String, dynamic>>[];
-      }).toList();
-
-      final results = await Future.wait(tasks);
-      // Deduplicate by MAC + IP
-      final seen = <String, Map<String, dynamic>>{};
-      for (final list in results) {
-        for (final lease in list) {
-          final mac = (lease['macaddr']?.toString() ?? '').toUpperCase();
-          final ip = lease['ipaddr']?.toString() ?? '';
-          final key = '$mac|$ip';
-          if (!seen.containsKey(key)) {
-            seen[key] = lease;
-          }
-        }
-      }
-      return seen.values.toList();
-    } catch (e, stack) {
-      Logger.exception('Failed to aggregate DHCP leases', e, stack);
       return [];
     }
   }

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:luci_mobile/models/client.dart';
 import 'package:luci_mobile/main.dart';
+import 'package:luci_mobile/services/client_list_policy.dart';
 import 'package:luci_mobile/widgets/luci_app_bar.dart';
 import 'package:luci_mobile/design/luci_design_system.dart';
 import 'package:luci_mobile/widgets/luci_loading_states.dart';
@@ -22,7 +23,6 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen>
   final Set<int> _expandedClientIndices = {};
   late AnimationController _controller;
   late TextEditingController _searchController;
-  bool _aggregateAllRouters = true;
   Future<List<Client>>? _clientsFuture;
   String? _lastSelectedRouterId;
 
@@ -41,18 +41,17 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen>
         });
       }
     });
-    // Initialize toggle from persisted state
     final initState = ref.read(appStateProvider);
-    _aggregateAllRouters = initState.clientsAggregateAllRouters;
     _lastSelectedRouterId = initState.selectedRouter?.id;
     _computeClientsFuture();
   }
 
   void _computeClientsFuture() {
     final appState = ref.read(appStateProvider);
-    _clientsFuture = _aggregateAllRouters
-        ? appState.fetchAggregatedClients()
-        : appState.fetchClientsForSelectedRouter();
+    _clientsFuture = switch (ClientListPolicy.scope) {
+      ClientListScope.selectedRouter =>
+        appState.fetchClientsForSelectedRouter(),
+    };
   }
 
   Future<void> _disconnectClient(Client client) async {
@@ -115,7 +114,7 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen>
     return FutureBuilder<List<Client>>(
       future: future,
       builder: (context, snapshot) {
-        final aggregatedClients = snapshot.data ?? [];
+        final loadedClients = snapshot.data ?? [];
         return Scaffold(
           appBar: const LuciAppBar(title: '设备'),
           body: Stack(
@@ -133,7 +132,7 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen>
                     final appState = ref.watch(appStateProvider);
                     final isLoading =
                         snapshot.connectionState == ConnectionState.waiting &&
-                        (aggregatedClients.isEmpty);
+                        loadedClients.isEmpty;
                     final dashboardError = appState.dashboardError;
 
                     if (isLoading) {
@@ -171,7 +170,7 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen>
                       );
                     }
 
-                    if (dashboardError != null && aggregatedClients.isEmpty) {
+                    if (dashboardError != null && loadedClients.isEmpty) {
                       return LuciErrorDisplay(
                         title: '设备加载失败',
                         message: '无法连接路由器，请检查网络连接和路由器 IP 地址。',
@@ -182,7 +181,7 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen>
                       );
                     }
 
-                    final clients = aggregatedClients;
+                    final clients = loadedClients;
 
                     final filteredClients = clients.where((client) {
                       final query = _searchQuery.toLowerCase();
@@ -237,46 +236,6 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen>
                             ),
                           ),
                         ),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16.0,
-                            vertical: 4.0,
-                          ),
-                          child: SegmentedButton<bool>(
-                            segments: const [
-                              ButtonSegment<bool>(
-                                value: true,
-                                label: Text('全部'),
-                                icon: Icon(Icons.apartment),
-                              ),
-                              ButtonSegment<bool>(
-                                value: false,
-                                label: Text('当前路由器'),
-                                icon: Icon(Icons.router),
-                              ),
-                            ],
-                            selected: {_aggregateAllRouters},
-                            showSelectedIcon: false,
-                            style: SegmentedButton.styleFrom(
-                              visualDensity: VisualDensity.compact,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                              ),
-                            ),
-                            onSelectionChanged: (s) {
-                              setState(() {
-                                _aggregateAllRouters = s.first;
-                                _computeClientsFuture();
-                              });
-                              // Persist selection
-                              ref
-                                  .read(appStateProvider)
-                                  .setClientsAggregateAllRouters(
-                                    _aggregateAllRouters,
-                                  );
-                            },
-                          ),
-                        ),
                         Expanded(
                           child: filteredClients.isEmpty
                               ? LuciEmptyState(
@@ -311,9 +270,8 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen>
                                           client: client,
                                           isExpanded: isExpanded,
                                           onDisconnect:
-                                              !_aggregateAllRouters &&
-                                                  client.connectionType ==
-                                                      ConnectionType.wireless
+                                              client.connectionType ==
+                                                  ConnectionType.wireless
                                               ? () => _disconnectClient(client)
                                               : null,
                                           onTap: () {
