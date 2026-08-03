@@ -56,7 +56,6 @@ void main() {
     test('protected RPC uses the authenticated cookie session', () {
       final request = LuciAuthProtocol.rpcRequest(
         session: session,
-        endpoint: LuciRpcEndpoint.protected,
         object: 'system',
         method: 'board',
       );
@@ -64,33 +63,6 @@ void main() {
       expect(request.path, '/cgi-bin/luci/admin/ubus2fa');
       expect(request.headers['Cookie'], 'sysauth_https=abc123');
       expect(request.body['params'][0], '00000000000000000000000000000000');
-    });
-
-    test('legacy RPC keeps the session ID in the JSON-RPC parameters', () {
-      final request = LuciAuthProtocol.rpcRequest(
-        session: session,
-        endpoint: LuciRpcEndpoint.legacy,
-        object: 'system',
-        method: 'board',
-      );
-
-      expect(request.path, '/cgi-bin/luci/admin/ubus');
-      expect(request.body['params'][0], 'abc123');
-    });
-
-    test('falls back only when the protected endpoint is missing', () {
-      expect(
-        LuciAuthProtocol.shouldFallbackToLegacy(LuciRpcEndpoint.protected, 404),
-        isTrue,
-      );
-      expect(
-        LuciAuthProtocol.shouldFallbackToLegacy(LuciRpcEndpoint.protected, 403),
-        isFalse,
-      );
-      expect(
-        LuciAuthProtocol.shouldFallbackToLegacy(LuciRpcEndpoint.legacy, 404),
-        isFalse,
-      );
     });
   });
 }

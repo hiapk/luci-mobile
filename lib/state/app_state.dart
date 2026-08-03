@@ -255,10 +255,180 @@ class AppState extends ChangeNotifier {
   }
 
   String? get sysauth => _authService?.sysauth;
+  String? get authCookieName => _authService?.cookieName;
   bool get isAuthenticated => _authService?.isAuthenticated ?? false;
   bool get requiresOtp => _authService?.requiresOtp ?? false;
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
+
+  Future<dynamic> _callCurrentRouter(
+    String object,
+    String method, {
+    Map<String, dynamic>? params,
+    BuildContext? context,
+  }) {
+    final router = _routerService?.selectedRouter;
+    final token = _authService?.sysauth;
+    if (router == null || token == null) {
+      throw StateError('当前没有可用的路由器会话。');
+    }
+    return _apiService!.call(
+      router.ipAddress,
+      token,
+      router.useHttps,
+      object: object,
+      method: method,
+      params: params,
+      context: context,
+    );
+  }
+
+  Future<List<String>> fetchSystemLogs({BuildContext? context}) async {
+    final result = await _callCurrentRouter(
+      'log',
+      'read',
+      params: {'lines': 1000, 'oneshot': true, 'stream': false},
+      context: context,
+    );
+    final data = _rpcDataMap(result);
+    final entries = data?['log'];
+    if (entries is! List) return [];
+    return entries.reversed.map((entry) {
+      if (entry is! Map) return entry.toString();
+      final message = entry['msg']?.toString() ?? '';
+      final seconds = num.tryParse(entry['time']?.toString() ?? '');
+      if (seconds == null) return message;
+      final time = DateTime.fromMillisecondsSinceEpoch(
+        (seconds * 1000).round(),
+      ).toLocal();
+      return '[${time.toString().split('.').first}] $message';
+    }).toList();
+  }
+
+  Future<List<String>> fetchKernelLogs({BuildContext? context}) async {
+    final result = await _callCurrentRouter(
+      'file',
+      'exec',
+      params: {
+        'command': '/bin/dmesg',
+        'params': ['-r'],
+      },
+      context: context,
+    );
+    final data = _rpcDataMap(result);
+    final output = data?['stdout']?.toString() ?? '';
+    return const LineSplitter()
+        .convert(output)
+        .reversed
+        .map((line) => line.replaceFirst(RegExp(r'^<\d+>'), ''))
+        .toList();
+  }
+
+  Future<List<Map<String, dynamic>>> fetchProcesses({
+    BuildContext? context,
+  }) async {
+    final result = await _callCurrentRouter(
+      'luci',
+      'getProcessList',
+      context: context,
+    );
+    final data = _rpcDataMap(result);
+    final entries = data?['result'];
+    if (entries is! List) return [];
+    final processes = entries
+        .whereType<Map>()
+        .map(
+          (entry) => entry.map((key, value) => MapEntry(key.toString(), value)),
+        )
+        .toList();
+    processes.sort((a, b) {
+      final aCpu = _percentageValue(a['%CPU'] ?? a['cpu']);
+      final bCpu = _percentageValue(b['%CPU'] ?? b['cpu']);
+      return bCpu.compareTo(aCpu);
+    });
+    return processes;
+  }
+
+  Future<Map<String, dynamic>> fetchStartupServices({
+    BuildContext? context,
+  }) async {
+    final result = await _callCurrentRouter('rc', 'list', context: context);
+    return _rpcDataMap(result) ?? {};
+  }
+
+  Future<void> controlStartupService(
+    String name,
+    String action, {
+    BuildContext? context,
+  }) async {
+    final result = await _callCurrentRouter(
+      'rc',
+      'init',
+      params: {'name': name, 'action': action},
+      context: context,
+    );
+    if (result is! List || result.isEmpty || result.first != 0) {
+      throw Exception('服务操作失败。');
+    }
+  }
+
+  Future<void> disconnectWirelessClient(
+    String macAddress, {
+    BuildContext? context,
+  }) async {
+    final router = _routerService?.selectedRouter;
+    final token = _authService?.sysauth;
+    if (router == null || token == null) {
+      throw StateError('当前没有可用的路由器会话。');
+    }
+    final stations = await _apiService!
+        .fetchAllAssociatedWirelessMacsWithContext(
+          ipAddress: router.ipAddress,
+          sysauth: token,
+          useHttps: router.useHttps,
+          context: context,
+        );
+    final normalizedMac = macAddress.toLowerCase();
+    String? interface;
+    for (final entry in stations.entries) {
+      if (entry.value.any((mac) => mac.toLowerCase() == normalizedMac)) {
+        interface = entry.key;
+        break;
+      }
+    }
+    if (interface == null) {
+      throw Exception('找不到该设备关联的无线接口。');
+    }
+    if (context != null && !context.mounted) {
+      throw StateError('页面已关闭，操作已取消。');
+    }
+
+    final result = await _callCurrentRouter(
+      'hostapd.$interface',
+      'del_client',
+      params: {
+        'addr': macAddress,
+        'deauth': true,
+        'reason': 5,
+        'ban_time': 60000,
+      },
+      context: context,
+    );
+    if (result is! List || result.isEmpty || result.first != 0) {
+      throw Exception('路由器拒绝断开该设备。');
+    }
+  }
+
+  static Map<String, dynamic>? _rpcDataMap(dynamic result) {
+    if (result is! List || result.length < 2 || result.first != 0) return null;
+    final data = result[1];
+    if (data is! Map) return null;
+    return data.map((key, value) => MapEntry(key.toString(), value));
+  }
+
+  static double _percentageValue(dynamic value) {
+    return double.tryParse(value?.toString().replaceAll('%', '') ?? '') ?? 0;
+  }
 
   void setError(String error) {
     _errorMessage = error;

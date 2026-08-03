@@ -11,6 +11,9 @@ class MockAuthService implements IAuthService {
   String? get sysauth => _sysauth;
 
   @override
+  String? get cookieName => _useHttps ? 'sysauth_https' : 'sysauth_http';
+
+  @override
   String? get ipAddress => _ipAddress;
 
   @override

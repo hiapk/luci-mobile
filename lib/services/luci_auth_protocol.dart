@@ -2,8 +2,6 @@ const String luciAnonymousSession = '00000000000000000000000000000000';
 
 enum LuciLoginStatus { success, otpRequired, rejected, connectionError }
 
-enum LuciRpcEndpoint { protected, legacy }
-
 class LuciAuthCookie {
   final String name;
   final String value;
@@ -88,16 +86,12 @@ class LuciAuthProtocol {
 
   static LuciRpcRequest rpcRequest({
     required LuciSession session,
-    required LuciRpcEndpoint endpoint,
     required String object,
     required String method,
     Map<String, dynamic>? params,
   }) {
-    final protected = endpoint == LuciRpcEndpoint.protected;
     return LuciRpcRequest(
-      path: protected
-          ? '/cgi-bin/luci/admin/ubus2fa'
-          : '/cgi-bin/luci/admin/ubus',
+      path: '/cgi-bin/luci/admin/ubus2fa',
       headers: {
         'Content-Type': 'application/json',
         'Cookie': '${session.cookieName}=${session.token}',
@@ -107,19 +101,12 @@ class LuciAuthProtocol {
         'id': 1,
         'method': 'call',
         'params': [
-          protected ? luciAnonymousSession : session.token,
+          luciAnonymousSession,
           object,
           method,
           params ?? <String, dynamic>{},
         ],
       },
     );
-  }
-
-  static bool shouldFallbackToLegacy(
-    LuciRpcEndpoint endpoint,
-    int? statusCode,
-  ) {
-    return endpoint == LuciRpcEndpoint.protected && statusCode == 404;
   }
 }

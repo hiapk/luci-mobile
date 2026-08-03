@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:luci_mobile/screens/dashboard_screen.dart';
 import 'package:luci_mobile/screens/clients_screen.dart';
 import 'package:luci_mobile/screens/interfaces_screen.dart';
+import 'package:luci_mobile/screens/luci_menu_screen.dart';
 import 'package:luci_mobile/screens/more_screen.dart';
 import 'package:luci_mobile/main.dart';
 import 'package:luci_mobile/widgets/luci_navigation_enhancements.dart';
@@ -61,6 +62,7 @@ class _MainScreenState extends ConsumerState<MainScreen> {
       scrollToInterface: _currentInterfaceToScroll,
       onScrollComplete: _clearInterfaceToScroll,
     ),
+    const LuciMenuScreen(),
     const MoreScreen(),
   ];
 
@@ -110,12 +112,12 @@ class _MainScreenState extends ConsumerState<MainScreen> {
             appStateProvider.select((state) => state.isRebooting),
           );
           Color? getTabColor(int index) =>
-              (isRebooting && index != 3) ? Colors.grey.withAlpha(128) : null;
+              (isRebooting && index != 4) ? Colors.grey.withAlpha(128) : null;
           double getTabOpacity(int index) =>
-              (isRebooting && index != 3) ? 0.5 : 1.0;
+              (isRebooting && index != 4) ? 0.5 : 1.0;
           return NavigationBar(
             onDestinationSelected: (index) {
-              if (isRebooting && index != 3) return; // Only allow 'More' tab
+              if (isRebooting && index != 4) return; // Only allow 'More' tab
               _onItemTapped(index);
             },
             selectedIndex: _selectedIndex,
@@ -156,10 +158,21 @@ class _MainScreenState extends ConsumerState<MainScreen> {
               NavigationDestination(
                 selectedIcon: Opacity(
                   opacity: getTabOpacity(3),
-                  child: Icon(Icons.more_horiz),
+                  child: Icon(Icons.web, color: getTabColor(3)),
                 ),
                 icon: Opacity(
                   opacity: getTabOpacity(3),
+                  child: Icon(Icons.web_outlined, color: getTabColor(3)),
+                ),
+                label: 'LuCI',
+              ),
+              NavigationDestination(
+                selectedIcon: Opacity(
+                  opacity: getTabOpacity(4),
+                  child: Icon(Icons.more_horiz),
+                ),
+                icon: Opacity(
+                  opacity: getTabOpacity(4),
                   child: Icon(Icons.more_horiz_outlined),
                 ),
                 label: '更多',

@@ -24,6 +24,7 @@ abstract class IAuthService {
   });
 
   String? get sysauth;
+  String? get cookieName;
   String? get ipAddress;
   bool get useHttps;
   bool get isAuthenticated;

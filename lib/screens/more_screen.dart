@@ -11,6 +11,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 import 'package:luci_mobile/config/app_config.dart';
 import 'package:luci_mobile/screens/manage_routers_screen.dart';
+import 'package:luci_mobile/screens/router_tools_screen.dart';
 import 'package:luci_mobile/utils/http_client_manager.dart';
 import 'package:luci_mobile/state/app_state.dart';
 
@@ -303,6 +304,20 @@ class _MoreScreenState extends ConsumerState<MoreScreen> {
                 );
                 return _MoreScreenSection(
                   tiles: [
+                    _buildMoreTile(
+                      context,
+                      icon: Icons.build_outlined,
+                      iconColor: Theme.of(context).colorScheme.primary,
+                      title: '管理工具',
+                      subtitle: '日志、进程和启动服务',
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (context) => const RouterToolsScreen(),
+                          ),
+                        );
+                      },
+                    ),
                     _buildMoreTile(
                       context,
                       icon: Icons.restart_alt,

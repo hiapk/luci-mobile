@@ -10,6 +10,7 @@ class RealAuthService implements IAuthService {
   final IApiService _apiService;
 
   String? _sysauth;
+  String? _cookieName;
   String? _ipAddress;
   bool _useHttps = false;
   bool _requiresOtp = false;
@@ -18,6 +19,8 @@ class RealAuthService implements IAuthService {
 
   @override
   String? get sysauth => _sysauth;
+  @override
+  String? get cookieName => _cookieName;
   @override
   String? get ipAddress => _ipAddress;
   @override
@@ -55,6 +58,7 @@ class RealAuthService implements IAuthService {
     BuildContext? context,
   }) async {
     _sysauth = null;
+    _cookieName = null;
     _requiresOtp = false;
     try {
       // Check if the API service is RealApiService to use protocol detection
@@ -72,6 +76,9 @@ class RealAuthService implements IAuthService {
         if (loginResult.token != null) {
           _requiresOtp = false;
           _sysauth = loginResult.token;
+          _cookieName =
+              loginResult.cookieName ??
+              (loginResult.actualUseHttps ? 'sysauth_https' : 'sysauth_http');
           _ipAddress = ip;
           _useHttps = loginResult.actualUseHttps; // Use the detected protocol
 
@@ -103,6 +110,7 @@ class RealAuthService implements IAuthService {
           context: context,
         );
         _sysauth = token;
+        _cookieName = useHttps ? 'sysauth_https' : 'sysauth_http';
         _ipAddress = ip;
         _useHttps = useHttps;
 
@@ -166,6 +174,7 @@ class RealAuthService implements IAuthService {
   @override
   Future<void> logout() async {
     _sysauth = null;
+    _cookieName = null;
     _ipAddress = null;
     _useHttps = false;
     _requiresOtp = false;

@@ -37,7 +37,6 @@ Uri _buildUrl(String ipAddress, bool useHttps, String path) {
 class RealApiService implements IApiService {
   final HttpClientManager _httpClientManager = HttpClientManager();
   final Map<String, LuciSession> _sessions = {};
-  final Map<String, LuciRpcEndpoint> _rpcEndpoints = {};
   LuciLoginStatus _lastLoginStatus = LuciLoginStatus.rejected;
   String? _lastCookieName;
 
@@ -401,12 +400,9 @@ class RealApiService implements IApiService {
           cookieName: useHttps ? 'sysauth_https' : 'sysauth_http',
           useHttps: useHttps,
         );
-    var endpoint = _rpcEndpoints[routerKey] ?? LuciRpcEndpoint.protected;
-
-    Future<Response<dynamic>> send(LuciRpcEndpoint target) {
+    Future<Response<dynamic>> send() {
       final request = LuciAuthProtocol.rpcRequest(
         session: session,
-        endpoint: target,
         object: object,
         method: method,
         params: params,
@@ -423,21 +419,7 @@ class RealApiService implements IApiService {
     }
 
     try {
-      var response = await send(endpoint);
-
-      // Older LuCI releases do not provide ubus2fa. Only an explicit 404 is
-      // treated as proof that the protected endpoint is unavailable. A 403
-      // always means the current session must be renewed and never downgrades.
-      if (LuciAuthProtocol.shouldFallbackToLegacy(
-        endpoint,
-        response.statusCode,
-      )) {
-        endpoint = LuciRpcEndpoint.legacy;
-        _rpcEndpoints[routerKey] = endpoint;
-        response = await send(endpoint);
-      } else if (response.statusCode == 200) {
-        _rpcEndpoints[routerKey] = endpoint;
-      }
+      final response = await send();
 
       if (response.statusCode == 200) {
         final decoded = response.data is String

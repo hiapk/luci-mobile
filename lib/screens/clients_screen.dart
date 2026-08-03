@@ -55,6 +55,43 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen>
         : appState.fetchClientsForSelectedRouter();
   }
 
+  Future<void> _disconnectClient(Client client) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('断开无线设备'),
+        content: Text('确定断开 ${client.hostname} 吗？设备将在 1 分钟内无法重新连接。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('断开'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await ref
+          .read(appStateProvider)
+          .disconnectWirelessClient(client.macAddress, context: context);
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('已断开 ${client.hostname}')));
+      setState(_computeClientsFuture);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.toString())));
+    }
+  }
+
   @override
   void dispose() {
     _controller.dispose();
@@ -273,6 +310,12 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen>
                                         child: _UnifiedClientCard(
                                           client: client,
                                           isExpanded: isExpanded,
+                                          onDisconnect:
+                                              !_aggregateAllRouters &&
+                                                  client.connectionType ==
+                                                      ConnectionType.wireless
+                                              ? () => _disconnectClient(client)
+                                              : null,
                                           onTap: () {
                                             setState(() {
                                               if (isExpanded) {
@@ -311,11 +354,13 @@ class _UnifiedClientCard extends StatefulWidget {
   final Client client;
   final bool isExpanded;
   final VoidCallback onTap;
+  final Future<void> Function()? onDisconnect;
 
   const _UnifiedClientCard({
     required this.client,
     required this.isExpanded,
     required this.onTap,
+    this.onDisconnect,
   });
 
   @override
@@ -325,6 +370,7 @@ class _UnifiedClientCard extends StatefulWidget {
 class _UnifiedClientCardState extends State<_UnifiedClientCard>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
+  bool _disconnecting = false;
 
   @override
   void initState() {
@@ -450,8 +496,7 @@ class _UnifiedClientCardState extends State<_UnifiedClientCard>
                           Text(
                             widget.client.hostname,
                             style: LuciTextStyles.cardTitle(context),
-                            semanticsLabel:
-                                '设备主机名：${widget.client.hostname}',
+                            semanticsLabel: '设备主机名：${widget.client.hostname}',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -496,9 +541,7 @@ class _UnifiedClientCardState extends State<_UnifiedClientCard>
                       widget.isExpanded ? Icons.expand_less : Icons.expand_more,
                       color: colorScheme.onSurfaceVariant,
                       size: 26,
-                      semanticLabel: widget.isExpanded
-                          ? '收起详情'
-                          : '展开详情',
+                      semanticLabel: widget.isExpanded ? '收起详情' : '展开详情',
                     ),
                   ],
                 ),
@@ -666,10 +709,38 @@ class _UnifiedClientCardState extends State<_UnifiedClientCard>
             semanticsLabel:
                 'Lease Time Remaining: ${client.formattedLeaseTime}',
           ),
+          if (widget.onDisconnect != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+              child: SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _disconnecting ? null : _disconnectClient,
+                  icon: _disconnecting
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.wifi_off_rounded),
+                  label: const Text('断开无线设备（1 分钟）'),
+                ),
+              ),
+            ),
           const SizedBox(height: 8),
         ],
       ),
     );
+  }
+
+  Future<void> _disconnectClient() async {
+    final disconnect = widget.onDisconnect;
+    if (disconnect == null || _disconnecting) return;
+    setState(() => _disconnecting = true);
+    try {
+      await disconnect();
+    } finally {
+      if (mounted) setState(() => _disconnecting = false);
+    }
   }
 
   String _buildMinimalClientSubtitle(Client client) {
