@@ -1,6 +1,7 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'dart:convert';
 import 'package:luci_mobile/models/router.dart';
+import 'package:luci_mobile/services/luci_auth_protocol.dart';
 import '../utils/logger.dart';
 import 'package:luci_mobile/config/app_config.dart';
 
@@ -9,6 +10,76 @@ class SecureStorageService {
 
   static const String _routersKey = 'routers';
   static const String _selectedRouterKey = 'selectedRouterId';
+  static const String _luciSessionPrefix = 'luciSession:';
+
+  String _luciSessionKey(String ipAddress, bool useHttps) {
+    final identity = '${useHttps ? 'https' : 'http'}://$ipAddress';
+    return '$_luciSessionPrefix${base64Url.encode(utf8.encode(identity))}';
+  }
+
+  Future<void> saveLuciSession({
+    required String ipAddress,
+    required bool useHttps,
+    required String token,
+    required String cookieName,
+  }) async {
+    try {
+      await _storage.write(
+        key: _luciSessionKey(ipAddress, useHttps),
+        value: jsonEncode({
+          'version': 1,
+          'token': token,
+          'cookieName': cookieName,
+          'useHttps': useHttps,
+        }),
+      );
+    } catch (e, stack) {
+      Logger.exception('Failed to save LuCI session', e, stack);
+      rethrow;
+    }
+  }
+
+  Future<LuciSession?> getLuciSession({
+    required String ipAddress,
+    required bool useHttps,
+  }) async {
+    try {
+      final value = await _storage.read(
+        key: _luciSessionKey(ipAddress, useHttps),
+      );
+      if (value == null || value.isEmpty) return null;
+      final decoded = jsonDecode(value);
+      if (decoded is! Map) return null;
+      final token = decoded['token']?.toString();
+      final cookieName = decoded['cookieName']?.toString();
+      if (token == null ||
+          token.isEmpty ||
+          cookieName == null ||
+          cookieName.isEmpty ||
+          decoded['useHttps'] != useHttps) {
+        return null;
+      }
+      return LuciSession(
+        token: token,
+        cookieName: cookieName,
+        useHttps: useHttps,
+      );
+    } catch (e, stack) {
+      Logger.exception('Failed to read LuCI session', e, stack);
+      return null;
+    }
+  }
+
+  Future<void> deleteLuciSession({
+    required String ipAddress,
+    required bool useHttps,
+  }) async {
+    try {
+      await _storage.delete(key: _luciSessionKey(ipAddress, useHttps));
+    } catch (e, stack) {
+      Logger.exception('Failed to delete LuCI session', e, stack);
+    }
+  }
 
   Future<void> saveCredentials({
     required String ipAddress,

@@ -160,19 +160,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     if (success && mounted) {
       unawaited(Navigator.of(context).pushReplacementNamed('/'));
     } else {
-      if (appState.requiresOtp) {
-        final credentials = await SecureStorageService().getCredentials();
-        if (!mounted) return;
-        final address = credentials['ipAddress'];
-        final username = credentials['username'];
-        final password = credentials['password'];
-        final useHttps = credentials['useHttps'] == 'true';
-        if (address != null) {
-          _ipController.text = '${useHttps ? 'https' : 'http'}://$address';
-        }
-        if (username != null) _usernameController.text = username;
-        if (password != null) _passwordController.text = password;
+      final credentials = await SecureStorageService().getCredentials();
+      if (!mounted) return;
+      final address = credentials['ipAddress'];
+      final username = credentials['username'];
+      final password = credentials['password'];
+      final useHttps = credentials['useHttps'] == 'true';
+      if (address != null) {
+        _ipController.text = '${useHttps ? 'https' : 'http'}://$address';
       }
+      if (username != null) _usernameController.text = username;
+      if (password != null) _passwordController.text = password;
       if (mounted) {
         setState(() {
           _isCheckingAutoLogin = false;

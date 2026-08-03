@@ -4,6 +4,9 @@ import 'package:luci_mobile/services/api_service.dart';
 import 'package:luci_mobile/services/secure_storage_service.dart';
 import 'package:luci_mobile/services/interfaces/auth_service_interface.dart';
 import 'package:luci_mobile/utils/logger.dart';
+import 'package:luci_mobile/services/luci_auth_protocol.dart';
+
+enum _SavedSessionResult { missing, valid, expired, unavailable }
 
 class RealAuthService implements IAuthService {
   final SecureStorageService _secureStorageService = SecureStorageService();
@@ -88,6 +91,12 @@ class RealAuthService implements IAuthService {
             password: pass,
             useHttps: loginResult.actualUseHttps, // Save the detected protocol
           );
+          await _secureStorageService.saveLuciSession(
+            ipAddress: ip,
+            useHttps: loginResult.actualUseHttps,
+            token: _sysauth!,
+            cookieName: _cookieName!,
+          );
 
           if (loginResult.actualUseHttps != useHttps) {
             Logger.info(
@@ -136,39 +145,91 @@ class RealAuthService implements IAuthService {
     bool? useHttps, {
     BuildContext? context,
   }) async {
-    if (ipAddress != null &&
-        username != null &&
-        password != null &&
-        useHttps != null) {
-      return await _login(
-        ipAddress,
-        username,
-        password,
-        useHttps,
-        context: context,
-      );
+    _sysauth = null;
+    _cookieName = null;
+    _ipAddress = null;
+    _useHttps = false;
+    _requiresOtp = false;
+
+    String? ip = ipAddress;
+    String? user = username;
+    String? pass = password;
+    bool? https = useHttps;
+    if (ip == null || user == null || pass == null || https == null) {
+      final credentials = await _secureStorageService.getCredentials();
+      ip = credentials['ipAddress'];
+      user = credentials['username'];
+      pass = credentials['password'];
+      https = credentials['useHttps'] == null
+          ? null
+          : credentials['useHttps'] == 'true';
     }
-    return await _tryAutoLoginFromStorage(context: context);
+
+    if (ip == null || user == null || pass == null || https == null) {
+      return false;
+    }
+
+    final savedSession = await _restoreSavedSession(ip, https);
+    if (savedSession == _SavedSessionResult.valid) return true;
+    if (savedSession == _SavedSessionResult.unavailable) return false;
+    if (context != null && !context.mounted) return false;
+
+    return _login(ip, user, pass, https, context: context);
   }
 
-  Future<bool> _tryAutoLoginFromStorage({BuildContext? context}) async {
-    final credentials = await _secureStorageService.getCredentials();
-    final ip = credentials['ipAddress'];
-    final user = credentials['username'];
-    final pass = credentials['password'];
-    final useHttps = credentials['useHttps'] == 'true';
+  Future<_SavedSessionResult> _restoreSavedSession(
+    String ip,
+    bool useHttps,
+  ) async {
+    final session = await _secureStorageService.getLuciSession(
+      ipAddress: ip,
+      useHttps: useHttps,
+    );
+    if (session == null) return _SavedSessionResult.missing;
+    final apiService = _apiService;
+    if (apiService is! RealApiService) return _SavedSessionResult.missing;
 
-    if (ip != null && user != null && pass != null) {
-      return await _login(
+    apiService.restoreSession(ip, useHttps, session);
+    try {
+      final result = await apiService.call(
         ip,
-        user,
-        pass,
+        session.token,
         useHttps,
-        context: context?.mounted == true ? context : null,
+        object: 'system',
+        method: 'board',
+        params: const {},
       );
+      if (result is List && result.isNotEmpty && result.first == 0) {
+        _sysauth = session.token;
+        _cookieName = session.cookieName;
+        _ipAddress = ip;
+        _useHttps = useHttps;
+        _requiresOtp = false;
+        Logger.info('Restored authenticated LuCI session for $ip');
+        return _SavedSessionResult.valid;
+      }
+      await _deleteSavedSession(ip, useHttps, apiService);
+      return _SavedSessionResult.expired;
+    } on LuciSessionExpiredException {
+      await _deleteSavedSession(ip, useHttps, apiService);
+      return _SavedSessionResult.expired;
+    } catch (e, stack) {
+      apiService.forgetSession(ip, useHttps);
+      Logger.exception('Failed to validate saved LuCI session', e, stack);
+      return _SavedSessionResult.unavailable;
     }
+  }
 
-    return false;
+  Future<void> _deleteSavedSession(
+    String ip,
+    bool useHttps,
+    RealApiService apiService,
+  ) async {
+    apiService.forgetSession(ip, useHttps);
+    await _secureStorageService.deleteLuciSession(
+      ipAddress: ip,
+      useHttps: useHttps,
+    );
   }
 
   @override

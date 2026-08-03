@@ -14,6 +14,7 @@ import 'package:luci_mobile/models/dashboard_preferences.dart';
 import 'package:luci_mobile/services/interfaces/auth_service_interface.dart';
 import 'package:luci_mobile/services/interfaces/api_service_interface.dart';
 import 'package:luci_mobile/services/api_service.dart';
+import 'package:luci_mobile/services/luci_auth_protocol.dart';
 import 'package:luci_mobile/services/service_factory.dart';
 import 'package:luci_mobile/config/app_config.dart';
 import 'package:luci_mobile/utils/http_client_manager.dart';
@@ -21,6 +22,7 @@ import 'package:luci_mobile/utils/logger.dart';
 
 class AppState extends ChangeNotifier {
   static AppState? _instance;
+  late final Future<void> _initialization;
 
   late final SecureStorageService _secureStorageService;
   IApiService? _apiService;
@@ -79,7 +81,7 @@ class AppState extends ChangeNotifier {
   }
 
   AppState._() {
-    _initialize();
+    _initialization = _initialize();
   }
 
   static AppState get instance {
@@ -281,6 +283,39 @@ class AppState extends ChangeNotifier {
       params: params,
       context: context,
     );
+  }
+
+  void _synchronizeApiSession() {
+    final apiService = _apiService;
+    final token = _authService?.sysauth;
+    final cookieName = _authService?.cookieName;
+    final ipAddress = _authService?.ipAddress;
+    if (apiService is! RealApiService ||
+        token == null ||
+        cookieName == null ||
+        ipAddress == null) {
+      return;
+    }
+    apiService.restoreSession(
+      ipAddress,
+      _authService!.useHttps,
+      LuciSession(
+        token: token,
+        cookieName: cookieName,
+        useHttps: _authService!.useHttps,
+      ),
+    );
+  }
+
+  Future<void> _synchronizeSelectedRouterProtocol() async {
+    final router = _routerService?.selectedRouter;
+    final actualUseHttps = _authService?.useHttps;
+    if (router == null ||
+        actualUseHttps == null ||
+        router.useHttps == actualUseHttps) {
+      return;
+    }
+    await updateRouter(router.copyWith(useHttps: actualUseHttps));
   }
 
   Future<List<String>> fetchSystemLogs({BuildContext? context}) async {
@@ -497,6 +532,10 @@ class AppState extends ChangeNotifier {
 
     // Clear certificates for this specific router
     await _httpClientManager.clearCertificatesForHost(router.ipAddress);
+    await _secureStorageService.deleteLuciSession(
+      ipAddress: router.ipAddress,
+      useHttps: router.useHttps,
+    );
 
     final needsSwitch = await _routerService!.removeRouter(id);
     if (needsSwitch && _routerService!.routers.isNotEmpty) {
@@ -531,15 +570,16 @@ class AppState extends ChangeNotifier {
 
     notifyListeners();
     // ignore: use_build_context_synchronously
-    final loginSuccess = await login(
+    final loginSuccess = await _authService!.tryAutoLogin(
       found.ipAddress,
       found.username,
       found.password,
       found.useHttps,
-      fromRouter: true,
       context: safeContext, // ignore: use_build_context_synchronously
     );
     if (loginSuccess) {
+      await _synchronizeSelectedRouterProtocol();
+      _synchronizeApiSession();
       await fetchDashboardData();
     }
     _isLoading = false;
@@ -580,6 +620,7 @@ class AppState extends ChangeNotifier {
 
       // Check if authentication was successful
       if (_authService!.isAuthenticated) {
+        _synchronizeApiSession();
         // Get the actual protocol used (might be different due to redirect)
         final actualUseHttps = _authService!.useHttps;
 
@@ -634,6 +675,11 @@ class AppState extends ChangeNotifier {
   }
 
   void logout() {
+    final router = _routerService?.selectedRouter;
+    final apiService = _apiService;
+    if (router != null && apiService is RealApiService) {
+      apiService.forgetSession(router.ipAddress, router.useHttps);
+    }
     _authService?.logout().then((_) {});
     _dashboardData = null;
     _dashboardError = null;
@@ -1468,25 +1514,40 @@ class AppState extends ChangeNotifier {
   }
 
   Future<bool> tryAutoLogin({BuildContext? context}) async {
+    await _initialization;
+    if (context != null && !context.mounted) return false;
     if (_reviewerModeEnabled) {
-      return await _authService!.tryAutoLogin(
+      final success = await _authService!.tryAutoLogin(
         null,
         null,
         null,
         null,
         context: context,
       );
+      if (success) {
+        _synchronizeApiSession();
+        await fetchDashboardData();
+        _startThroughputTimer();
+      }
+      return success;
     }
+    final router = _routerService?.selectedRouter;
+    if (context != null && !context.mounted) return false;
     final success =
         await _authService?.tryAutoLogin(
-          null,
-          null,
-          null,
-          null,
+          router?.ipAddress,
+          router?.username,
+          router?.password,
+          router?.useHttps,
           context: context,
         ) ??
         false;
-    if (!success && requiresOtp) {
+    if (success) {
+      await _synchronizeSelectedRouterProtocol();
+      _synchronizeApiSession();
+      await fetchDashboardData();
+      _startThroughputTimer();
+    } else if (requiresOtp) {
       _errorMessage = '此路由器已启用两步验证，请输入 6 位验证码。';
       notifyListeners();
     }

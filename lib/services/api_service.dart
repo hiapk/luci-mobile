@@ -57,6 +57,14 @@ class RealApiService implements IApiService {
     _sessions[_routerKey(ipAddress, useHttps)] = session;
   }
 
+  void restoreSession(String ipAddress, bool useHttps, LuciSession session) {
+    _sessions[_routerKey(ipAddress, useHttps)] = session;
+  }
+
+  void forgetSession(String ipAddress, bool useHttps) {
+    _sessions.remove(_routerKey(ipAddress, useHttps));
+  }
+
   Dio _createHttpClient(
     bool useHttps,
     String hostWithPort, {
@@ -441,7 +449,7 @@ class RealApiService implements IApiService {
           return [0, result];
         }
       } else if (response.statusCode == 403) {
-        throw Exception('LuCI 会话已过期，请重新登录。');
+        throw const LuciSessionExpiredException();
       } else {
         throw Exception('RPC 调用失败：HTTP ${response.statusCode}');
       }

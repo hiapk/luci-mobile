@@ -2,6 +2,15 @@ const String luciAnonymousSession = '00000000000000000000000000000000';
 
 enum LuciLoginStatus { success, otpRequired, rejected, connectionError }
 
+class LuciSessionExpiredException implements Exception {
+  final String message;
+
+  const LuciSessionExpiredException([this.message = 'LuCI 会话已过期，请重新登录。']);
+
+  @override
+  String toString() => message;
+}
+
 class LuciAuthCookie {
   final String name;
   final String value;
