@@ -14,6 +14,7 @@ import 'package:luci_mobile/models/dashboard_preferences.dart';
 import 'package:luci_mobile/services/interfaces/auth_service_interface.dart';
 import 'package:luci_mobile/services/interfaces/api_service_interface.dart';
 import 'package:luci_mobile/services/api_service.dart';
+import 'package:luci_mobile/services/client_list_policy.dart';
 import 'package:luci_mobile/services/luci_auth_protocol.dart';
 import 'package:luci_mobile/services/luci_native_parsers.dart';
 import 'package:luci_mobile/services/service_factory.dart';
@@ -31,6 +32,7 @@ class AppState extends ChangeNotifier {
   RouterService? _routerService;
   ThroughputService? _throughputService;
   final HttpClientManager _httpClientManager = HttpClientManager();
+  final ClientListCache _clientListCache = ClientListCache();
 
   // Reviewer mode state
   bool _reviewerModeEnabled = false;
@@ -63,6 +65,8 @@ class AppState extends ChangeNotifier {
 
   List<model.Router> get routers => _routerService?.routers ?? [];
   model.Router? get selectedRouter => _routerService?.selectedRouter;
+  List<Client>? get cachedClientsForSelectedRouter =>
+      _clientListCache.forRouter(selectedRouter?.id);
 
   VoidCallback? onRouterBackOnline;
 
@@ -2616,6 +2620,10 @@ class AppState extends ChangeNotifier {
           if (cmpType != 0) return cmpType;
           return a.hostname.toLowerCase().compareTo(b.hostname.toLowerCase());
         });
+        final routerId = selectedRouter?.id;
+        if (routerId != null) {
+          _clientListCache.store(routerId, reviewerClients);
+        }
         return reviewerClients;
       }
 
@@ -2698,6 +2706,7 @@ class AppState extends ChangeNotifier {
         if (cmpType != 0) return cmpType;
         return a.hostname.toLowerCase().compareTo(b.hostname.toLowerCase());
       });
+      _clientListCache.store(router.id, clients);
       return clients;
     } catch (e, stack) {
       Logger.exception('Failed to fetch clients for selected router', e, stack);

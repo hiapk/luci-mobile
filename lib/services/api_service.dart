@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
+import 'package:luci_mobile/services/client_list_policy.dart';
 import 'package:luci_mobile/services/interfaces/api_service_interface.dart';
 import 'package:luci_mobile/services/luci_auth_protocol.dart';
 import '../utils/http_client_manager.dart';
@@ -575,39 +576,25 @@ class RealApiService implements IApiService {
       if (wirelessResult is List &&
           wirelessResult.length > 1 &&
           wirelessResult[0] == 0) {
-        final wirelessData = wirelessResult[1] as Map<String, dynamic>?;
-        if (wirelessData == null) return {};
-
-        final result = <String, Set<String>>{};
-
-        // For each wireless radio, get the associated stations
-        for (final entry in wirelessData.entries) {
-          final radioData = entry.value as Map<String, dynamic>?;
-          if (radioData == null || radioData['interfaces'] == null) continue;
-
-          final interfaces = radioData['interfaces'] as List?;
-          if (interfaces == null) continue;
-
-          for (final iface in interfaces) {
-            if (iface is Map<String, dynamic>) {
-              final ifname = iface['ifname'] as String?;
-              if (ifname != null) {
-                // Fetch associated stations for this interface
-                final stations = await fetchAssociatedStationsWithContext(
-                  ipAddress: ipAddress,
-                  sysauth: sysauth,
-                  useHttps: useHttps,
-                  interface: ifname,
-                  context: context?.mounted == true ? context : null,
-                );
-                if (stations.isNotEmpty) {
-                  result[ifname] = stations.toSet();
-                }
-              }
-            }
-          }
-        }
-        return result;
+        final wirelessData = wirelessResult[1];
+        final interfaces = WirelessInterfacePolicy.apInterfaceNames(
+          wirelessData,
+        );
+        final entries = await Future.wait(
+          interfaces.map((ifname) async {
+            final stations = await fetchAssociatedStationsWithContext(
+              ipAddress: ipAddress,
+              sysauth: sysauth,
+              useHttps: useHttps,
+              interface: ifname,
+              context: context?.mounted == true ? context : null,
+            );
+            return MapEntry(ifname, stations.toSet());
+          }),
+        );
+        return Map.fromEntries(
+          entries.where((entry) => entry.value.isNotEmpty),
+        );
       }
       return {};
     } catch (e, stack) {

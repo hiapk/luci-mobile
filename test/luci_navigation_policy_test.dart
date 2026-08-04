@@ -2,8 +2,17 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:luci_mobile/models/luci_menu_item.dart';
 import 'package:luci_mobile/services/luci_navigation_policy.dart';
 
-LuciMenuItem item(String key, List<String> path) =>
-    LuciMenuItem(key: key, title: key, order: 1, pathSegments: path);
+LuciMenuItem item(
+  String key,
+  List<String> path, {
+  List<LuciMenuItem> children = const [],
+}) => LuciMenuItem(
+  key: key,
+  title: key,
+  order: 1,
+  pathSegments: path,
+  children: children,
+);
 
 void main() {
   group('LuCI navigation policy', () {
@@ -149,6 +158,26 @@ void main() {
           reason: path.join('/'),
         );
       }
+    });
+
+    test('opens iStore directly instead of exposing its status API', () {
+      final store = item(
+        'store',
+        const ['admin', 'store'],
+        children: [
+          item('status', const ['admin', 'store', 'status']),
+        ],
+      );
+      final services = item(
+        'services',
+        const ['admin', 'services'],
+        children: [
+          item('openclash', const ['admin', 'services', 'openclash']),
+        ],
+      );
+
+      expect(LuciNavigationPolicy.shouldOpenItemDirectly(store), isTrue);
+      expect(LuciNavigationPolicy.shouldOpenItemDirectly(services), isFalse);
     });
   });
 }

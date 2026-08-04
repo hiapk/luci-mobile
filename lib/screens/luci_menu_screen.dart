@@ -323,11 +323,9 @@ class _LuciMenuScreenState extends ConsumerState<LuciMenuScreen> {
                             title: Text(item.title),
                             trailing: const CupertinoListTileChevron(),
                             onTap:
-                                item.children.isEmpty ||
-                                    LuciNavigationPolicy.nativeDestinationFor(
-                                          item,
-                                        ) !=
-                                        null
+                                LuciNavigationPolicy.shouldOpenItemDirectly(
+                                  item,
+                                )
                                 ? () => _openItem(appState, item)
                                 : () => _openSubmenu(appState, item),
                           ),

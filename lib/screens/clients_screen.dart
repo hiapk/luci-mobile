@@ -112,7 +112,9 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen>
       future = _clientsFuture;
     }
     return FutureBuilder<List<Client>>(
+      key: ValueKey(currentId),
       future: future,
+      initialData: watchedAppState.cachedClientsForSelectedRouter,
       builder: (context, snapshot) {
         final loadedClients = snapshot.data ?? [];
         return Scaffold(

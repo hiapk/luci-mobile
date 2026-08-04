@@ -66,6 +66,13 @@ class LuciNavigationPolicy {
         : LuciPagePresentation.nativePage;
   }
 
+  static bool shouldOpenItemDirectly(LuciMenuItem item) {
+    final path = item.pathSegments.join('/');
+    return path == 'admin/store' ||
+        item.children.isEmpty ||
+        nativeDestinationFor(item) != null;
+  }
+
   static int? mainTabIndexFor(LuciMenuItem item) {
     final path = item.pathSegments.join('/');
     if (path == 'admin/status/overview') return 0;
