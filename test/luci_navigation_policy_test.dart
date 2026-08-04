@@ -81,13 +81,61 @@ void main() {
       }
     });
 
-    test('keeps complex applications in the authenticated WebView', () {
-      for (final key in ['store', 'docker', 'openclash', 'linkease']) {
+    test('routes extended LuCI and iStoreOS pages to native screens', () {
+      final expected = <List<String>, LuciNativeDestination>{
+        const ['admin', 'network', 'switch']:
+            LuciNativeDestination.switchConfiguration,
+        const ['admin', 'system', 'package-manager']:
+            LuciNativeDestination.packageManager,
+        const ['admin', 'system', 'diskman']:
+            LuciNativeDestination.storageManagement,
+        const ['admin', 'system', 'luci-fan']: LuciNativeDestination.fanControl,
+        const ['admin', 'nas']: LuciNativeDestination.storageManagement,
+        const ['admin', 'nas', 'mergerfs']:
+            LuciNativeDestination.storageManagement,
+        const ['admin', 'nas', 'cifs']: LuciNativeDestination.storageManagement,
+        const ['admin', 'nas', 'nfs']: LuciNativeDestination.storageManagement,
+        const ['admin', 'docker', 'containers']: LuciNativeDestination.docker,
+        const ['admin', 'docker', 'images']: LuciNativeDestination.docker,
+        const ['admin', 'docker', 'networks']: LuciNativeDestination.docker,
+        const ['admin', 'docker', 'volumes']: LuciNativeDestination.docker,
+        const ['admin', 'docker', 'events']: LuciNativeDestination.docker,
+      };
+
+      for (final entry in expected.entries) {
+        final menuItem = item(entry.key.last, entry.key);
         expect(
-          LuciNavigationPolicy.presentationFor(
-            item(key, ['admin', 'services', key]),
-          ),
+          LuciNavigationPolicy.presentationFor(menuItem),
+          LuciPagePresentation.nativePage,
+          reason: entry.key.join('/'),
+        );
+        expect(
+          LuciNavigationPolicy.nativeDestinationFor(menuItem),
+          entry.value,
+          reason: entry.key.join('/'),
+        );
+      }
+    });
+
+    test('hides the legacy network guide child', () {
+      final visible = LuciNavigationPolicy.filterVisibleChildren([
+        item('network', const ['admin', 'network', 'network']),
+        item('interfaceconfig', const ['admin', 'network', 'interfaceconfig']),
+      ]);
+
+      expect(visible.map((entry) => entry.key), ['network']);
+    });
+
+    test('keeps complex applications in the authenticated WebView', () {
+      for (final path in [
+        const ['admin', 'store'],
+        const ['admin', 'services', 'openclash'],
+        const ['admin', 'services', 'linkease'],
+      ]) {
+        expect(
+          LuciNavigationPolicy.presentationFor(item(path.last, path)),
           LuciPagePresentation.webView,
+          reason: path.join('/'),
         );
       }
     });

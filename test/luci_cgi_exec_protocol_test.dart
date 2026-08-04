@@ -41,4 +41,23 @@ void main() {
 
     expect(request.fields['command'], '/bin/ping -c 1 openwrt.org');
   });
+
+  test('CGI executor escapes whitespace and backslashes in arguments', () {
+    const session = LuciSession(
+      token: 'token',
+      cookieName: 'sysauth_https',
+      useHttps: true,
+    );
+
+    final request = LuciAuthProtocol.cgiExecRequest(
+      session: session,
+      command: '/usr/bin/example command',
+      arguments: const [r'a\b', 'two words'],
+    );
+
+    expect(
+      request.fields['command'],
+      r'/usr/bin/example\ command a\\b two\ words',
+    );
+  });
 }

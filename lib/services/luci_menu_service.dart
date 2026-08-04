@@ -72,7 +72,8 @@ class LuciMenuService {
     if (node == null || node['satisfied'] != true) return null;
 
     final rawTitle = node['title']?.toString().trim() ?? '';
-    if (rawTitle.isEmpty) return null;
+    final translatedTitle = _translateTitle(key, rawTitle);
+    if (translatedTitle.isEmpty) return null;
 
     final path = [...parentPath, key];
     final parsedChildren = <LuciMenuItem>[];
@@ -89,13 +90,16 @@ class LuciMenuService {
       }
     }
     parsedChildren.sort(_compareItems);
+    final visibleChildren = LuciNavigationPolicy.filterVisibleChildren(
+      parsedChildren,
+    );
 
     return LuciMenuItem(
       key: key,
-      title: _translateTitle(key, rawTitle),
+      title: translatedTitle,
       order: _orderOf(node['order']),
       pathSegments: path,
-      children: parsedChildren,
+      children: visibleChildren,
     );
   }
 
@@ -133,6 +137,7 @@ class LuciMenuService {
       'store': 'iStore',
       'services': '服务',
       'docker': 'Docker',
+      'nas': '存储',
       'network': '网络',
       'vpn': 'VPN',
       'overview': '概览',
@@ -179,6 +184,14 @@ class LuciMenuService {
       'config': '配置',
       'tool': '工具',
       'console': '控制台',
+      'mergerfs': '合并存储池',
+      'cifs': '网络共享挂载',
+      'nfs': 'NFS 共享',
+      'diskman': '磁盘管理',
+      'luci-fan': '风扇控制',
+      'ota': '系统更新',
+      'tuning': '高级调优',
+      'filetransfer': '文件传输',
     };
     const byTitle = <String, String>{
       'Status': '状态',

@@ -15,6 +15,7 @@ import 'package:luci_mobile/services/interfaces/auth_service_interface.dart';
 import 'package:luci_mobile/services/interfaces/api_service_interface.dart';
 import 'package:luci_mobile/services/api_service.dart';
 import 'package:luci_mobile/services/luci_auth_protocol.dart';
+import 'package:luci_mobile/services/luci_native_parsers.dart';
 import 'package:luci_mobile/services/service_factory.dart';
 import 'package:luci_mobile/config/app_config.dart';
 import 'package:luci_mobile/utils/http_client_manager.dart';
@@ -655,6 +656,433 @@ class AppState extends ChangeNotifier {
       context: context,
     );
     return _rpcDataMap(result) ?? const {};
+  }
+
+  Future<String> _checkedExecFile(
+    String command,
+    List<String> params, {
+    BuildContext? context,
+    Set<int> acceptedCodes = const {0},
+  }) async {
+    final result = await _execFile(command, params, context: context);
+    final code = int.tryParse(result['code']?.toString() ?? '') ?? -1;
+    if (!acceptedCodes.contains(code)) {
+      final message = result['stderr']?.toString().trim();
+      throw Exception(
+        message == null || message.isEmpty ? '路由器命令执行失败（退出码 $code）。' : message,
+      );
+    }
+    return result['stdout']?.toString() ?? '';
+  }
+
+  Future<String> _execDirect(
+    String command,
+    List<String> arguments, {
+    BuildContext? context,
+  }) async {
+    final router = _routerService?.selectedRouter;
+    final token = _authService?.sysauth;
+    if (router == null || token == null) {
+      throw StateError('当前没有可用的路由器会话。');
+    }
+    return _apiService!.execDirect(
+      router.ipAddress,
+      token,
+      router.useHttps,
+      command: command,
+      arguments: arguments,
+      context: context,
+    );
+  }
+
+  Future<List<RouterPackageInfo>> fetchPackageCatalog({
+    BuildContext? context,
+  }) async {
+    final outputs = await Future.wait([
+      _execDirect('/usr/libexec/package-manager-call', const [
+        'list-available',
+      ], context: context),
+      _execDirect(
+        '/usr/libexec/package-manager-call',
+        const ['list-installed'],
+        context: context?.mounted == true ? context : null,
+      ),
+    ]);
+    final packages = <String, RouterPackageInfo>{};
+    for (final item in parsePackageControlRecords(outputs[0])) {
+      packages[item.name] = item;
+    }
+    for (final item in parsePackageControlRecords(outputs[1])) {
+      packages[item.name] = item;
+    }
+    final result = packages.values.toList()
+      ..sort((a, b) => a.name.compareTo(b.name));
+    return result;
+  }
+
+  Future<String> runPackageAction(
+    String action, {
+    List<String> packages = const [],
+    BuildContext? context,
+  }) async {
+    const actions = {'update', 'install', 'upgrade', 'remove'};
+    if (!actions.contains(action)) throw ArgumentError.value(action, 'action');
+    if (action != 'update' && packages.isEmpty) {
+      throw const FormatException('请选择软件包。');
+    }
+    final packagePattern = RegExp(r'^[a-zA-Z0-9][a-zA-Z0-9+_.-]*$');
+    if (packages.any((name) => !packagePattern.hasMatch(name))) {
+      throw const FormatException('软件包名称不合法。');
+    }
+    final output = await _execDirect('/usr/libexec/package-manager-call', [
+      action,
+      ...packages,
+    ], context: context);
+    final jsonStart = output.indexOf('{');
+    if (jsonStart < 0) return output.trim();
+    final decoded = jsonDecode(output.substring(jsonStart));
+    if (decoded is! Map) return output.trim();
+    final code = int.tryParse(decoded['code']?.toString() ?? '') ?? -1;
+    if (code != 0) {
+      throw Exception(
+        decoded['stderr']?.toString().trim().isNotEmpty == true
+            ? decoded['stderr'].toString().trim()
+            : '软件包操作失败（退出码 $code）。',
+      );
+    }
+    return decoded['stdout']?.toString().trim() ?? '';
+  }
+
+  Future<Map<String, dynamic>> fetchDockerOverview({
+    BuildContext? context,
+  }) async {
+    const format = '{{json .}}';
+    final outputs = await Future.wait([
+      _checkedExecFile('/usr/bin/docker', const [
+        'ps',
+        '-a',
+        '--format',
+        format,
+      ], context: context),
+      _checkedExecFile('/usr/bin/docker', const [
+        'image',
+        'ls',
+        '--format',
+        format,
+      ], context: context?.mounted == true ? context : null),
+      _checkedExecFile('/usr/bin/docker', const [
+        'network',
+        'ls',
+        '--format',
+        format,
+      ], context: context?.mounted == true ? context : null),
+      _checkedExecFile('/usr/bin/docker', const [
+        'volume',
+        'ls',
+        '--format',
+        format,
+      ], context: context?.mounted == true ? context : null),
+      _checkedExecFile('/usr/bin/docker', const [
+        'info',
+        '--format',
+        format,
+      ], context: context?.mounted == true ? context : null),
+    ]);
+    return {
+      'containers': parseJsonLines(outputs[0]),
+      'images': parseJsonLines(outputs[1]),
+      'networks': parseJsonLines(outputs[2]),
+      'volumes': parseJsonLines(outputs[3]),
+      'info': parseJsonLines(outputs[4]).firstOrNull ?? const {},
+    };
+  }
+
+  Future<List<Map<String, dynamic>>> fetchDockerEvents({
+    BuildContext? context,
+  }) async {
+    final output = await _checkedExecFile('/usr/bin/docker', const [
+      'events',
+      '--since',
+      '24h',
+      '--until',
+      'now',
+      '--format',
+      '{{json .}}',
+    ], context: context);
+    return parseJsonLines(output).reversed.take(100).toList();
+  }
+
+  Future<String> fetchDockerContainerLogs(
+    String container, {
+    BuildContext? context,
+  }) async {
+    _validateDockerTarget(container);
+    return _checkedExecFile('/usr/bin/docker', [
+      'logs',
+      '--tail',
+      '300',
+      '--timestamps',
+      container,
+    ], context: context);
+  }
+
+  Future<void> controlDockerContainer(
+    String container,
+    String action, {
+    BuildContext? context,
+  }) async {
+    const actions = {'start', 'stop', 'restart', 'pause', 'unpause', 'remove'};
+    if (!actions.contains(action)) throw ArgumentError.value(action, 'action');
+    _validateDockerTarget(container);
+    final args = action == 'remove'
+        ? ['rm', '-f', container]
+        : [action, container];
+    await _checkedExecFile('/usr/bin/docker', args, context: context);
+  }
+
+  Future<void> removeDockerImage(String image, {BuildContext? context}) async {
+    _validateDockerTarget(image);
+    await _checkedExecFile('/usr/bin/docker', [
+      'image',
+      'rm',
+      image,
+    ], context: context);
+  }
+
+  Future<void> pullDockerImage(String image, {BuildContext? context}) async {
+    _validateDockerTarget(image);
+    await _checkedExecFile('/usr/bin/docker', [
+      'image',
+      'pull',
+      image,
+    ], context: context);
+  }
+
+  Future<void> createDockerContainer({
+    required String name,
+    required String image,
+    List<String> ports = const [],
+    List<String> volumes = const [],
+    bool start = true,
+    BuildContext? context,
+  }) async {
+    _validateDockerTarget(name);
+    _validateDockerTarget(image);
+    final mappingPattern = RegExp(r'^[a-zA-Z0-9_./:[\]-]+$');
+    if ([
+      ...ports,
+      ...volumes,
+    ].any((value) => !mappingPattern.hasMatch(value))) {
+      throw const FormatException('端口或目录映射格式不合法。');
+    }
+    await _checkedExecFile('/usr/bin/docker', [
+      'create',
+      '--name',
+      name,
+      '--restart',
+      'unless-stopped',
+      for (final port in ports) ...['--publish', port],
+      for (final volume in volumes) ...['--volume', volume],
+      image,
+    ], context: context);
+    if (start) {
+      await _checkedExecFile('/usr/bin/docker', [
+        'start',
+        name,
+      ], context: context?.mounted == true ? context : null);
+    }
+  }
+
+  static void _validateDockerTarget(String value) {
+    if (!RegExp(r'^[a-zA-Z0-9][a-zA-Z0-9_.:@/-]*$').hasMatch(value)) {
+      throw const FormatException('Docker 目标名称不合法。');
+    }
+  }
+
+  Future<Map<String, dynamic>> fetchStorageManagementOverview({
+    BuildContext? context,
+  }) async {
+    final results = await Future.wait([
+      fetchMountPoints(context: context),
+      fetchUciSections(
+        'mergerfs',
+        context: context?.mounted == true ? context : null,
+      ),
+      fetchUciSections(
+        'cifs',
+        context: context?.mounted == true ? context : null,
+      ),
+      fetchUciSections(
+        'nfs',
+        context: context?.mounted == true ? context : null,
+      ),
+    ]);
+    return {
+      ...results[0],
+      'mergerfs': results[1],
+      'cifs': results[2],
+      'nfs': results[3],
+    };
+  }
+
+  Future<Map<String, dynamic>> fetchSwitchOverview({
+    BuildContext? context,
+  }) async {
+    final results = await Future.wait([
+      _callCurrentRouter('luci-rpc', 'getNetworkDevices', context: context),
+      _callCurrentRouter(
+        'network.interface',
+        'dump',
+        context: context?.mounted == true ? context : null,
+      ),
+      fetchUciSections(
+        'network',
+        context: context?.mounted == true ? context : null,
+      ),
+    ]);
+    return {
+      'devices': _rpcDataMap(results[0]) ?? const {},
+      'interfaces': _rpcDataMap(results[1]) ?? const {},
+      'config': results[2],
+    };
+  }
+
+  Future<void> controlNetworkInterface(
+    String interface,
+    String action, {
+    BuildContext? context,
+  }) async {
+    if (!RegExp(r'^[a-zA-Z0-9_.-]+$').hasMatch(interface)) {
+      throw const FormatException('网络接口名称不合法。');
+    }
+    const actions = {'up', 'down', 'renew'};
+    if (!actions.contains(action)) throw ArgumentError.value(action, 'action');
+    final result = await _callCurrentRouter(
+      'network.interface.$interface',
+      action,
+      context: context,
+    );
+    if (result is! List || result.isEmpty || result.first != 0) {
+      throw Exception('路由器拒绝执行该网络操作。');
+    }
+  }
+
+  Future<Map<String, dynamic>> fetchFanOverview({BuildContext? context}) async {
+    final results = await Future.wait([
+      fetchUciSections('luci-fan', context: context),
+      _checkedExecFile(
+        '/usr/bin/sensors',
+        const [],
+        context: context?.mounted == true ? context : null,
+      ),
+    ]);
+    return {'config': results[0], 'sensors': results[1]};
+  }
+
+  Future<Map<String, dynamic>> fetchSystemUpdateOverview({
+    BuildContext? context,
+  }) async {
+    final results = await Future.wait([
+      readRouterFile('/etc/os-release', context: context),
+      fetchUciSections(
+        'ota',
+        context: context?.mounted == true ? context : null,
+      ),
+      _checkedExecFile(
+        '/bin/ota',
+        const ['check'],
+        context: context?.mounted == true ? context : null,
+        acceptedCodes: const {0, 1, 2},
+      ),
+    ]);
+    return {'release': results[0], 'config': results[1], 'update': results[2]};
+  }
+
+  Future<String> controlSystemUpdate(
+    String action, {
+    BuildContext? context,
+  }) async {
+    const actions = {'check', 'download', 'progress', 'cancel'};
+    if (!actions.contains(action)) throw ArgumentError.value(action, 'action');
+    return _checkedExecFile(
+      '/bin/ota',
+      [action],
+      context: context,
+      acceptedCodes: action == 'check' || action == 'progress'
+          ? const {0, 1, 2, 254}
+          : const {0},
+    );
+  }
+
+  Future<Map<String, dynamic>> fetchSystemTuningOverview({
+    BuildContext? context,
+  }) async {
+    final results = await Future.wait([
+      fetchUciSections('cpufreq', context: context),
+      _checkedExecFile(
+        '/usr/bin/sensors',
+        const [],
+        context: context?.mounted == true ? context : null,
+      ),
+      readRouterFile(
+        '/proc/cpuinfo',
+        context: context?.mounted == true ? context : null,
+      ),
+    ]);
+    return {'config': results[0], 'sensors': results[1], 'cpuinfo': results[2]};
+  }
+
+  Future<List<Map<String, dynamic>>> listRouterDirectory(
+    String path, {
+    BuildContext? context,
+  }) async {
+    _validateRouterFilePath(path);
+    final result = await _callCurrentRouter(
+      'file',
+      'list',
+      params: {'path': path},
+      context: context,
+    );
+    final entries = _rpcDataMap(result)?['entries'];
+    if (entries is! List) return const [];
+    return entries.whereType<Map>().map((entry) {
+      return entry.map((key, value) => MapEntry(key.toString(), value));
+    }).toList()..sort((a, b) {
+      final aDirectory = a['type'] == 'directory';
+      final bDirectory = b['type'] == 'directory';
+      if (aDirectory != bDirectory) return aDirectory ? -1 : 1;
+      return (a['name']?.toString() ?? '').compareTo(
+        b['name']?.toString() ?? '',
+      );
+    });
+  }
+
+  Future<void> removeRouterPath(String path, {BuildContext? context}) async {
+    _validateRouterFilePath(path, allowRoot: false);
+    final result = await _callCurrentRouter(
+      'file',
+      'remove',
+      params: {'path': path},
+      context: context,
+    );
+    if (result is! List || result.isEmpty || result.first != 0) {
+      throw Exception('路由器拒绝删除该路径。');
+    }
+  }
+
+  static void _validateRouterFilePath(String path, {bool allowRoot = true}) {
+    final allowed =
+        path == '/root' ||
+        path.startsWith('/root/') ||
+        path == '/tmp' ||
+        path.startsWith('/tmp/') ||
+        path == '/mnt' ||
+        path.startsWith('/mnt/');
+    if (!allowed ||
+        path.contains('/../') ||
+        (!allowRoot && const {'/root', '/tmp', '/mnt'}.contains(path))) {
+      throw const FormatException('只能管理 /root、/tmp 和 /mnt 下的文件。');
+    }
   }
 
   Future<Map<String, Map<String, dynamic>>> fetchUciSections(

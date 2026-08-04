@@ -28,6 +28,15 @@ enum LuciNativeDestination {
   mountPoints,
   ledSettings,
   ddns,
+  switchConfiguration,
+  packageManager,
+  storageManagement,
+  fanControl,
+  docker,
+  systemUpdate,
+  backupFirmware,
+  fileTransfer,
+  systemTuning,
 }
 
 class LuciNavigationPolicy {
@@ -36,10 +45,17 @@ class LuciNavigationPolicy {
     'network_guide',
     'vpn',
   };
+  static const Set<String> _hiddenChildKeys = {'interfaceconfig'};
 
   static List<LuciMenuItem> filterVisibleRoots(List<LuciMenuItem> items) {
     return items
         .where((item) => !_hiddenRootKeys.contains(item.key))
+        .toList(growable: false);
+  }
+
+  static List<LuciMenuItem> filterVisibleChildren(List<LuciMenuItem> items) {
+    return items
+        .where((item) => !_hiddenChildKeys.contains(item.key))
         .toList(growable: false);
   }
 
@@ -131,6 +147,35 @@ class LuciNavigationPolicy {
     }
     if (path == 'admin/services/ddns') {
       return LuciNativeDestination.ddns;
+    }
+    if (path == 'admin/network/switch') {
+      return LuciNativeDestination.switchConfiguration;
+    }
+    if (path == 'admin/system/package-manager') {
+      return LuciNativeDestination.packageManager;
+    }
+    if (path == 'admin/system/diskman' ||
+        path == 'admin/nas' ||
+        path.startsWith('admin/nas/')) {
+      return LuciNativeDestination.storageManagement;
+    }
+    if (path == 'admin/system/luci-fan') {
+      return LuciNativeDestination.fanControl;
+    }
+    if (path == 'admin/docker' || path.startsWith('admin/docker/')) {
+      return LuciNativeDestination.docker;
+    }
+    if (path == 'admin/system/ota') {
+      return LuciNativeDestination.systemUpdate;
+    }
+    if (path == 'admin/system/flash') {
+      return LuciNativeDestination.backupFirmware;
+    }
+    if (path == 'admin/system/filetransfer') {
+      return LuciNativeDestination.fileTransfer;
+    }
+    if (path == 'admin/system/tuning') {
+      return LuciNativeDestination.systemTuning;
     }
     return null;
   }

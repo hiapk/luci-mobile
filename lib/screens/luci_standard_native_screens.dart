@@ -251,11 +251,80 @@ class _RouterWirelessScreenState extends ConsumerState<RouterWirelessScreen> {
     }
   }
 
+  Future<void> _editSection(String section, Map<String, dynamic> config) async {
+    final values = await Navigator.of(context).push<Map<String, dynamic>>(
+      CupertinoPageRoute(
+        builder: (_) =>
+            _WirelessSectionEditorScreen(section: section, config: config),
+      ),
+    );
+    if (values == null || !mounted) return;
+    if (values.remove('.delete') == true) {
+      final confirmed = await confirmNativeRouterAction(
+        context,
+        title: '删除无线网络？',
+        message: config['ssid']?.toString() ?? section,
+      );
+      if (!confirmed || !mounted) return;
+      try {
+        await ref
+            .read(appStateProvider)
+            .deleteUciSection('wireless', section, context: context);
+        if (mounted) _reload();
+      } catch (error) {
+        if (mounted) await showNativeRouterError(context, error);
+      }
+      return;
+    }
+    setState(() => _saving.add(section));
+    try {
+      await ref
+          .read(appStateProvider)
+          .setUciSection('wireless', section, values, context: context);
+      if (mounted) _reload();
+    } catch (error) {
+      if (mounted) await showNativeRouterError(context, error);
+    } finally {
+      if (mounted) setState(() => _saving.remove(section));
+    }
+  }
+
+  Future<void> _addNetwork() async {
+    final values = await Navigator.of(context).push<Map<String, dynamic>>(
+      CupertinoPageRoute(
+        builder: (_) => const _WirelessSectionEditorScreen(
+          section: '',
+          config: {
+            '.type': 'wifi-iface',
+            'device': 'radio0',
+            'mode': 'ap',
+            'network': 'lan',
+            'encryption': 'psk2',
+          },
+        ),
+      ),
+    );
+    if (values == null || !mounted) return;
+    try {
+      await ref
+          .read(appStateProvider)
+          .addUciSection('wireless', 'wifi-iface', values, context: context);
+      if (mounted) _reload();
+    } catch (error) {
+      if (mounted) await showNativeRouterError(context, error);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return NativeRouterScaffold(
       title: '无线网络',
       onRefresh: _reload,
+      trailing: CupertinoButton(
+        padding: EdgeInsets.zero,
+        onPressed: _addNetwork,
+        child: const Icon(CupertinoIcons.add, size: 22),
+      ),
       child: FutureBuilder<Map<String, Map<String, dynamic>>>(
         future: _future,
         builder: (context, snapshot) {
@@ -293,6 +362,9 @@ class _RouterWirelessScreenState extends ConsumerState<RouterWirelessScreen> {
                               onChanged: (value) =>
                                   _setEnabled(entry.key, entry.value, value),
                             ),
+                      onTap: busy
+                          ? null
+                          : () => _editSection(entry.key, entry.value),
                     );
                   }).toList(),
                 ),
@@ -313,6 +385,9 @@ class _RouterWirelessScreenState extends ConsumerState<RouterWirelessScreen> {
                               onChanged: (value) =>
                                   _setEnabled(entry.key, entry.value, value),
                             ),
+                      onTap: busy
+                          ? null
+                          : () => _editSection(entry.key, entry.value),
                     );
                   }).toList(),
                 ),
@@ -324,6 +399,111 @@ class _RouterWirelessScreenState extends ConsumerState<RouterWirelessScreen> {
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+class _WirelessSectionEditorScreen extends StatefulWidget {
+  final String section;
+  final Map<String, dynamic> config;
+
+  const _WirelessSectionEditorScreen({
+    required this.section,
+    required this.config,
+  });
+
+  @override
+  State<_WirelessSectionEditorScreen> createState() =>
+      _WirelessSectionEditorScreenState();
+}
+
+class _WirelessSectionEditorScreenState
+    extends State<_WirelessSectionEditorScreen> {
+  late final bool _radio = widget.config['.type'] == 'wifi-device';
+  late final Map<String, TextEditingController> _controllers = {
+    for (final key
+        in _radio
+            ? const ['channel', 'country', 'htmode', 'txpower']
+            : const ['ssid', 'device', 'network', 'mode', 'encryption', 'key'])
+      key: TextEditingController(
+        text: key == 'key' ? '' : _textValue(widget.config[key]),
+      ),
+  };
+
+  @override
+  void dispose() {
+    for (final controller in _controllers.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  void _save() {
+    if (!_radio && _controllers['ssid']!.text.trim().isEmpty) return;
+    final values = <String, dynamic>{...widget.config};
+    for (final entry in _controllers.entries) {
+      final value = entry.value.text.trim();
+      if (entry.key == 'key' && value.isEmpty) continue;
+      if (value.isEmpty) {
+        values.remove(entry.key);
+      } else {
+        values[entry.key] = value;
+      }
+    }
+    Navigator.of(context).pop(values);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final labels = _radio
+        ? const {
+            'channel': '信道（auto 或数字）',
+            'country': '国家代码',
+            'htmode': '频宽模式',
+            'txpower': '发射功率',
+          }
+        : const {
+            'ssid': 'SSID',
+            'device': '射频',
+            'network': '关联网络',
+            'mode': '模式（ap/sta）',
+            'encryption': '加密（psk2/sae/none）',
+            'key': '密码（留空保持不变）',
+          };
+    return CupertinoPageScaffold(
+      navigationBar: CupertinoNavigationBar(
+        middle: Text(_radio ? '编辑射频' : '编辑无线网络'),
+        trailing: CupertinoButton(
+          padding: EdgeInsets.zero,
+          onPressed: _save,
+          child: const Text('保存'),
+        ),
+      ),
+      child: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 18, 16, 24),
+          children: [
+            for (final entry in labels.entries) ...[
+              CupertinoTextField(
+                controller: _controllers[entry.key],
+                placeholder: entry.value,
+                obscureText: entry.key == 'key',
+                autocorrect: false,
+                padding: const EdgeInsets.all(13),
+              ),
+              const SizedBox(height: 12),
+            ],
+            if (!_radio && widget.section.isNotEmpty)
+              CupertinoButton(
+                color: CupertinoColors.systemRed,
+                onPressed: () => Navigator.of(
+                  context,
+                ).pop(<String, dynamic>{'.delete': true}),
+                child: const Text('删除无线网络'),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -563,11 +743,74 @@ class _RouterDhcpDnsScreenState extends ConsumerState<RouterDhcpDnsScreen> {
     }
   }
 
+  Future<void> _editServer(String section, Map<String, dynamic> config) async {
+    final values = await Navigator.of(context).push<Map<String, dynamic>>(
+      CupertinoPageRoute(builder: (_) => _DhcpPoolEditorScreen(config: config)),
+    );
+    if (values == null || !mounted) return;
+    setState(() => _saving.add(section));
+    try {
+      await ref
+          .read(appStateProvider)
+          .setUciSection('dhcp', section, values, context: context);
+      if (mounted) _reload();
+    } catch (error) {
+      if (mounted) await showNativeRouterError(context, error);
+    } finally {
+      if (mounted) setState(() => _saving.remove(section));
+    }
+  }
+
+  Future<void> _editStaticLease({
+    String? section,
+    Map<String, dynamic> config = const {},
+  }) async {
+    final values = await Navigator.of(context).push<Map<String, dynamic>>(
+      CupertinoPageRoute(
+        builder: (_) => _StaticLeaseEditorScreen(config: config),
+      ),
+    );
+    if (values == null || !mounted) return;
+    try {
+      final state = ref.read(appStateProvider);
+      if (section == null) {
+        await state.addUciSection('dhcp', 'host', values, context: context);
+      } else {
+        await state.setUciSection('dhcp', section, values, context: context);
+      }
+      if (mounted) _reload();
+    } catch (error) {
+      if (mounted) await showNativeRouterError(context, error);
+    }
+  }
+
+  Future<void> _deleteStaticLease(String section, String label) async {
+    final confirmed = await confirmNativeRouterAction(
+      context,
+      title: '删除静态租约？',
+      message: label,
+    );
+    if (!confirmed || !mounted) return;
+    try {
+      await ref
+          .read(appStateProvider)
+          .deleteUciSection('dhcp', section, context: context);
+      if (mounted) _reload();
+    } catch (error) {
+      if (mounted) await showNativeRouterError(context, error);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return NativeRouterScaffold(
       title: 'DHCP / DNS',
       onRefresh: _reload,
+      trailing: CupertinoButton(
+        padding: EdgeInsets.zero,
+        onPressed: () => _editStaticLease(),
+        child: const Icon(CupertinoIcons.add, size: 22),
+      ),
       child: FutureBuilder<Map<String, dynamic>>(
         future: _future,
         builder: (context, snapshot) {
@@ -595,6 +838,9 @@ class _RouterDhcpDnsScreenState extends ConsumerState<RouterDhcpDnsScreen> {
           final servers = config.entries
               .where((entry) => entry.value['.type'] == 'dhcp')
               .toList();
+          final staticLeases = config.entries
+              .where((entry) => entry.value['.type'] == 'host')
+              .toList();
           return ListView(
             padding: const EdgeInsets.only(top: 12, bottom: 24),
             children: [
@@ -617,6 +863,40 @@ class _RouterDhcpDnsScreenState extends ConsumerState<RouterDhcpDnsScreen> {
                               onChanged: (value) =>
                                   _toggleServer(entry.key, entry.value, value),
                             ),
+                      onTap: busy
+                          ? null
+                          : () => _editServer(entry.key, entry.value),
+                    );
+                  }).toList(),
+                ),
+              if (staticLeases.isNotEmpty)
+                CupertinoListSection.insetGrouped(
+                  header: Text('静态租约 ${staticLeases.length}'),
+                  children: staticLeases.map((entry) {
+                    final name = entry.value['name']?.toString() ?? entry.key;
+                    return CupertinoListTile(
+                      title: Text(name),
+                      subtitle: Text(
+                        _listLabel(entry.value['mac']).isEmpty
+                            ? '-'
+                            : _listLabel(entry.value['mac']),
+                      ),
+                      additionalInfo: Text(
+                        entry.value['ip']?.toString() ?? '-',
+                      ),
+                      trailing: CupertinoButton(
+                        padding: EdgeInsets.zero,
+                        onPressed: () => _deleteStaticLease(entry.key, name),
+                        child: const Icon(
+                          CupertinoIcons.delete,
+                          color: CupertinoColors.systemRed,
+                          size: 19,
+                        ),
+                      ),
+                      onTap: () => _editStaticLease(
+                        section: entry.key,
+                        config: entry.value,
+                      ),
                     );
                   }).toList(),
                 ),
@@ -635,6 +915,119 @@ class _RouterDhcpDnsScreenState extends ConsumerState<RouterDhcpDnsScreen> {
           );
         },
       ),
+    );
+  }
+}
+
+class _DhcpPoolEditorScreen extends StatefulWidget {
+  final Map<String, dynamic> config;
+
+  const _DhcpPoolEditorScreen({required this.config});
+
+  @override
+  State<_DhcpPoolEditorScreen> createState() => _DhcpPoolEditorScreenState();
+}
+
+class _DhcpPoolEditorScreenState extends State<_DhcpPoolEditorScreen> {
+  late final _start = TextEditingController(
+    text: widget.config['start']?.toString() ?? '100',
+  );
+  late final _limit = TextEditingController(
+    text: widget.config['limit']?.toString() ?? '150',
+  );
+  late final _leaseTime = TextEditingController(
+    text: widget.config['leasetime']?.toString() ?? '12h',
+  );
+
+  @override
+  void dispose() {
+    _start.dispose();
+    _limit.dispose();
+    _leaseTime.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    if (int.tryParse(_start.text.trim()) == null ||
+        int.tryParse(_limit.text.trim()) == null ||
+        _leaseTime.text.trim().isEmpty) {
+      return;
+    }
+    Navigator.of(context).pop(<String, dynamic>{
+      ...widget.config,
+      'start': _start.text.trim(),
+      'limit': _limit.text.trim(),
+      'leasetime': _leaseTime.text.trim(),
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _NativeFieldsEditorScaffold(
+      title: '地址池',
+      onSave: _save,
+      fields: [
+        ('起始偏移', _start, TextInputType.number),
+        ('地址数量', _limit, TextInputType.number),
+        ('租期（例如 12h）', _leaseTime, null),
+      ],
+    );
+  }
+}
+
+class _StaticLeaseEditorScreen extends StatefulWidget {
+  final Map<String, dynamic> config;
+
+  const _StaticLeaseEditorScreen({required this.config});
+
+  @override
+  State<_StaticLeaseEditorScreen> createState() =>
+      _StaticLeaseEditorScreenState();
+}
+
+class _StaticLeaseEditorScreenState extends State<_StaticLeaseEditorScreen> {
+  late final _name = TextEditingController(
+    text: widget.config['name']?.toString() ?? '',
+  );
+  late final _mac = TextEditingController(
+    text: _textValue(widget.config['mac']),
+  );
+  late final _ip = TextEditingController(
+    text: widget.config['ip']?.toString() ?? '',
+  );
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _mac.dispose();
+    _ip.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    final mac = _mac.text.trim();
+    if (_ip.text.trim().isEmpty ||
+        !RegExp(r'^(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$').hasMatch(mac)) {
+      return;
+    }
+    Navigator.of(context).pop(<String, dynamic>{
+      ...widget.config,
+      if (_name.text.trim().isNotEmpty) 'name': _name.text.trim(),
+      'mac': mac,
+      'ip': _ip.text.trim(),
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _NativeFieldsEditorScaffold(
+      title: '静态租约',
+      onSave: _save,
+      fields: [
+        ('主机名', _name, null),
+        ('MAC 地址', _mac, null),
+        ('IP 地址', _ip, TextInputType.number),
+      ],
     );
   }
 }
@@ -676,11 +1069,66 @@ class _RouterFirewallConfigScreenState
     }
   }
 
+  Future<void> _editEntry({
+    String? section,
+    Map<String, dynamic> config = const {'.type': 'rule'},
+  }) async {
+    final values = await Navigator.of(context).push<Map<String, dynamic>>(
+      CupertinoPageRoute(
+        builder: (_) => _FirewallEntryEditorScreen(
+          config: config,
+          canDelete: section != null,
+        ),
+      ),
+    );
+    if (values == null || !mounted) return;
+    if (values.remove('.delete') == true && section != null) {
+      final confirmed = await confirmNativeRouterAction(
+        context,
+        title: '删除防火墙配置？',
+        message: config['name']?.toString() ?? section,
+      );
+      if (!confirmed || !mounted) return;
+      try {
+        await ref
+            .read(appStateProvider)
+            .deleteUciSection('firewall', section, context: context);
+        if (mounted) _reload();
+      } catch (error) {
+        if (mounted) await showNativeRouterError(context, error);
+      }
+      return;
+    }
+    final type =
+        values.remove('.type')?.toString() ??
+        config['.type']?.toString() ??
+        'rule';
+    try {
+      if (section == null) {
+        await ref
+            .read(appStateProvider)
+            .addUciSection('firewall', type, values, context: context);
+      } else {
+        await ref
+            .read(appStateProvider)
+            .setUciSection('firewall', section, values, context: context);
+      }
+      if (mounted) _reload();
+    } catch (error) {
+      if (mounted) await showNativeRouterError(context, error);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return NativeRouterScaffold(
       title: '防火墙',
       onRefresh: _reload,
+      trailing: CupertinoButton(
+        padding: EdgeInsets.zero,
+        onPressed: () => _editEntry(),
+        child: const Icon(CupertinoIcons.add, size: 22),
+      ),
       child: FutureBuilder<Map<String, Map<String, dynamic>>>(
         future: _future,
         builder: (context, snapshot) {
@@ -742,12 +1190,170 @@ class _RouterFirewallConfigScreenState
                             onChanged: (value) =>
                                 _setEnabled(entry.key, config, value),
                           ),
+                    onTap: () => _editEntry(section: entry.key, config: config),
                   );
                 }).toList(),
               );
             }).toList(),
           );
         },
+      ),
+    );
+  }
+}
+
+class _FirewallEntryEditorScreen extends StatefulWidget {
+  final Map<String, dynamic> config;
+  final bool canDelete;
+
+  const _FirewallEntryEditorScreen({
+    required this.config,
+    required this.canDelete,
+  });
+
+  @override
+  State<_FirewallEntryEditorScreen> createState() =>
+      _FirewallEntryEditorScreenState();
+}
+
+class _FirewallEntryEditorScreenState
+    extends State<_FirewallEntryEditorScreen> {
+  late String _type = widget.config['.type']?.toString() ?? 'rule';
+  late final Map<String, TextEditingController> _controllers = {
+    for (final key in const [
+      'name',
+      'src',
+      'dest',
+      'proto',
+      'src_ip',
+      'dest_ip',
+      'src_port',
+      'src_dport',
+      'dest_port',
+      'target',
+      'input',
+      'output',
+      'forward',
+      'network',
+    ])
+      key: TextEditingController(text: _textValue(widget.config[key])),
+  };
+
+  @override
+  void dispose() {
+    for (final controller in _controllers.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  void _save() {
+    final values = <String, dynamic>{...widget.config, '.type': _type};
+    for (final entry in _controllers.entries) {
+      final value = entry.value.text.trim();
+      if (value.isEmpty) {
+        values.remove(entry.key);
+      } else {
+        values[entry.key] = value;
+      }
+    }
+    if (const {'rule', 'redirect'}.contains(_type) &&
+        (values['name']?.toString() ?? '').isEmpty) {
+      return;
+    }
+    Navigator.of(context).pop(values);
+  }
+
+  List<String> get _visibleKeys => switch (_type) {
+    'redirect' => const [
+      'name',
+      'src',
+      'dest',
+      'proto',
+      'src_dport',
+      'dest_ip',
+      'dest_port',
+      'target',
+    ],
+    'zone' => const ['name', 'network', 'input', 'output', 'forward'],
+    'forwarding' => const ['name', 'src', 'dest'],
+    _ => const [
+      'name',
+      'src',
+      'dest',
+      'proto',
+      'src_ip',
+      'dest_ip',
+      'src_port',
+      'dest_port',
+      'target',
+    ],
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    const labels = {
+      'name': '名称',
+      'src': '源区域',
+      'dest': '目标区域',
+      'proto': '协议（tcp udp all）',
+      'src_ip': '源 IP',
+      'dest_ip': '目标 IP',
+      'src_port': '源端口',
+      'src_dport': '外部端口',
+      'dest_port': '目标端口',
+      'target': '动作（ACCEPT/REJECT/DNAT）',
+      'input': '入站策略',
+      'output': '出站策略',
+      'forward': '转发策略',
+      'network': '关联网络',
+    };
+    final fixedType = widget.config['.type'] != null && widget.canDelete;
+    return CupertinoPageScaffold(
+      navigationBar: CupertinoNavigationBar(
+        middle: const Text('防火墙配置'),
+        trailing: CupertinoButton(
+          padding: EdgeInsets.zero,
+          onPressed: _save,
+          child: const Text('保存'),
+        ),
+      ),
+      child: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 18, 16, 24),
+          children: [
+            if (!fixedType) ...[
+              CupertinoSlidingSegmentedControl<String>(
+                groupValue: _type,
+                children: const {
+                  'rule': Text('通信规则'),
+                  'redirect': Text('端口转发'),
+                },
+                onValueChanged: (value) {
+                  if (value != null) setState(() => _type = value);
+                },
+              ),
+              const SizedBox(height: 18),
+            ],
+            for (final key in _visibleKeys) ...[
+              CupertinoTextField(
+                controller: _controllers[key],
+                placeholder: labels[key],
+                autocorrect: false,
+                padding: const EdgeInsets.all(13),
+              ),
+              const SizedBox(height: 12),
+            ],
+            if (widget.canDelete)
+              CupertinoButton(
+                color: CupertinoColors.systemRed,
+                onPressed: () => Navigator.of(
+                  context,
+                ).pop(<String, dynamic>{'.delete': true}),
+                child: const Text('删除配置'),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -963,6 +1569,16 @@ class RouterAdministrationScreen extends StatelessWidget {
         icon: CupertinoIcons.lock_fill,
         page: const _RouterSshKeysScreen(),
       ),
+      (
+        title: 'Web 访问',
+        icon: CupertinoIcons.globe,
+        page: const _RouterWebAccessSettingsScreen(),
+      ),
+      (
+        title: '软件源',
+        icon: CupertinoIcons.cube_box_fill,
+        page: const _RouterPackageFeedsScreen(),
+      ),
     ];
     return CupertinoPageScaffold(
       backgroundColor: CupertinoColors.systemGroupedBackground.resolveFrom(
@@ -992,6 +1608,233 @@ class RouterAdministrationScreen extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _RouterWebAccessSettingsScreen extends ConsumerStatefulWidget {
+  const _RouterWebAccessSettingsScreen();
+
+  @override
+  ConsumerState<_RouterWebAccessSettingsScreen> createState() =>
+      _RouterWebAccessSettingsScreenState();
+}
+
+class _RouterWebAccessSettingsScreenState
+    extends ConsumerState<_RouterWebAccessSettingsScreen> {
+  late Future<Map<String, Map<String, dynamic>>> _future = _load();
+  bool _busy = false;
+
+  Future<Map<String, Map<String, dynamic>>> _load() =>
+      ref.read(appStateProvider).fetchUciSections('uhttpd', context: context);
+
+  void _reload() => setState(() => _future = _load());
+
+  Future<void> _set(
+    String section,
+    Map<String, dynamic> config,
+    String key,
+    dynamic value,
+  ) async {
+    setState(() => _busy = true);
+    try {
+      await ref.read(appStateProvider).setUciSection('uhttpd', section, {
+        ...config,
+        key: value,
+      }, context: context);
+      if (mounted) _reload();
+    } catch (error) {
+      if (mounted) await showNativeRouterError(context, error);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _editPort(
+    String section,
+    Map<String, dynamic> config,
+    String key,
+    String title,
+  ) async {
+    final current = _listenPort(config[key]);
+    final value = await promptNativeRouterText(
+      context,
+      title: title,
+      initialValue: current,
+      keyboardType: TextInputType.number,
+    );
+    if (value == null || !mounted) return;
+    final port = int.tryParse(value);
+    if (port == null || port < 1 || port > 65535) {
+      await showNativeRouterError(context, '端口必须在 1-65535 之间。');
+      return;
+    }
+    final confirmed = await confirmNativeRouterAction(
+      context,
+      title: '修改 Web 端口？',
+      message: '保存后当前连接可能中断，App 中配置的地址也需要同步修改。',
+    );
+    if (!confirmed || !mounted) return;
+    await _set(section, config, key, _replaceListenPort(config[key], value));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return NativeRouterScaffold(
+      title: 'Web 访问',
+      onRefresh: _reload,
+      child: FutureBuilder<Map<String, Map<String, dynamic>>>(
+        future: _future,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting &&
+              !snapshot.hasData) {
+            return const NativeRouterLoading();
+          }
+          if (snapshot.hasError) {
+            return NativeRouterError(error: snapshot.error, onRetry: _reload);
+          }
+          final entries = (snapshot.data ?? const {}).entries
+              .where((entry) => entry.value['.type'] == 'uhttpd')
+              .toList();
+          if (entries.isEmpty) {
+            return const NativeRouterEmpty(label: '没有 uHTTPd 配置');
+          }
+          final entry = entries.first;
+          final config = entry.value;
+          return ListView(
+            padding: const EdgeInsets.only(top: 12, bottom: 24),
+            children: [
+              CupertinoListSection.insetGrouped(
+                header: const Text('uHTTPd'),
+                children: [
+                  CupertinoListTile(
+                    title: const Text('HTTP 端口'),
+                    additionalInfo: Text(_listenPort(config['listen_http'])),
+                    trailing: const CupertinoListTileChevron(),
+                    onTap: _busy
+                        ? null
+                        : () => _editPort(
+                            entry.key,
+                            config,
+                            'listen_http',
+                            'HTTP 端口',
+                          ),
+                  ),
+                  CupertinoListTile(
+                    title: const Text('HTTPS 端口'),
+                    additionalInfo: Text(_listenPort(config['listen_https'])),
+                    trailing: const CupertinoListTileChevron(),
+                    onTap: _busy
+                        ? null
+                        : () => _editPort(
+                            entry.key,
+                            config,
+                            'listen_https',
+                            'HTTPS 端口',
+                          ),
+                  ),
+                  CupertinoListTile(
+                    title: const Text('强制 HTTPS'),
+                    trailing: _busy
+                        ? const CupertinoActivityIndicator()
+                        : CupertinoSwitch(
+                            value: _boolValue(config['redirect_https']),
+                            onChanged: (value) => _set(
+                              entry.key,
+                              config,
+                              'redirect_https',
+                              value ? '1' : '0',
+                            ),
+                          ),
+                  ),
+                  CupertinoListTile(
+                    title: const Text('限制私网 Host'),
+                    trailing: _busy
+                        ? const CupertinoActivityIndicator()
+                        : CupertinoSwitch(
+                            value: _boolValue(config['rfc1918_filter']),
+                            onChanged: (value) => _set(
+                              entry.key,
+                              config,
+                              'rfc1918_filter',
+                              value ? '1' : '0',
+                            ),
+                          ),
+                  ),
+                ],
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _RouterPackageFeedsScreen extends ConsumerWidget {
+  const _RouterPackageFeedsScreen();
+
+  static const _files = {
+    '/etc/opkg/distfeeds.conf': '官方软件源',
+    '/etc/opkg/customfeeds.conf': '自定义软件源',
+  };
+
+  Future<void> _edit(
+    BuildContext context,
+    WidgetRef ref,
+    String path,
+    String title,
+  ) async {
+    try {
+      final state = ref.read(appStateProvider);
+      final current = await state.readRouterFile(path, context: context);
+      if (!context.mounted) return;
+      final value = await Navigator.of(context).push<String>(
+        CupertinoPageRoute<String>(
+          builder: (_) =>
+              RouterTextFileEditorScreen(title: title, initialValue: current),
+        ),
+      );
+      if (value == null || !context.mounted) return;
+      final confirmed = await confirmNativeRouterAction(
+        context,
+        title: '覆盖软件源？',
+        message: '格式错误会导致软件包列表无法更新。',
+      );
+      if (!confirmed || !context.mounted) return;
+      await state.writeRouterFile(
+        path,
+        value.endsWith('\n') ? value : '$value\n',
+        context: context,
+      );
+      if (context.mounted) {
+        await showNativeRouterMessage(context, '软件源已保存');
+      }
+    } catch (error) {
+      if (context.mounted) await showNativeRouterError(context, error);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return NativeRouterScaffold(
+      title: '软件源',
+      onRefresh: () {},
+      child: ListView(
+        padding: const EdgeInsets.only(top: 12, bottom: 24),
+        children: [
+          CupertinoListSection.insetGrouped(
+            children: _files.entries.map((entry) {
+              return CupertinoListTile(
+                title: Text(entry.value),
+                subtitle: Text(entry.key),
+                trailing: const CupertinoListTileChevron(),
+                onTap: () => _edit(context, ref, entry.key, entry.value),
+              );
+            }).toList(),
+          ),
+        ],
       ),
     );
   }
@@ -1645,6 +2488,49 @@ class _RouterDdnsScreenState extends ConsumerState<RouterDdnsScreen> {
   }
 }
 
+class _NativeFieldsEditorScaffold extends StatelessWidget {
+  final String title;
+  final VoidCallback onSave;
+  final List<(String, TextEditingController, TextInputType?)> fields;
+
+  const _NativeFieldsEditorScaffold({
+    required this.title,
+    required this.onSave,
+    required this.fields,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return CupertinoPageScaffold(
+      navigationBar: CupertinoNavigationBar(
+        middle: Text(title),
+        trailing: CupertinoButton(
+          padding: EdgeInsets.zero,
+          onPressed: onSave,
+          child: const Text('保存'),
+        ),
+      ),
+      child: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 18, 16, 24),
+          children: [
+            for (final field in fields) ...[
+              CupertinoTextField(
+                controller: field.$2,
+                placeholder: field.$1,
+                keyboardType: field.$3,
+                autocorrect: false,
+                padding: const EdgeInsets.all(13),
+              ),
+              const SizedBox(height: 12),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class RouterTextFileEditorScreen extends StatefulWidget {
   final String title;
   final String initialValue;
@@ -1947,4 +2833,27 @@ String formatDuration(dynamic seconds) {
 String _listLabel(dynamic value) {
   if (value is List) return value.join(', ');
   return value?.toString() ?? '-';
+}
+
+String _textValue(dynamic value) {
+  if (value is List) return value.join(' ');
+  return value?.toString() ?? '';
+}
+
+String _listenPort(dynamic value) {
+  final first = value is List ? value.firstOrNull : value;
+  final address = first?.toString() ?? '';
+  return RegExp(r':(\d+)$').firstMatch(address)?.group(1) ?? '-';
+}
+
+dynamic _replaceListenPort(dynamic value, String port) {
+  String replace(dynamic address) {
+    final text = address.toString();
+    return text.contains(':')
+        ? text.replaceFirst(RegExp(r'\d+$'), port)
+        : '$text:$port';
+  }
+
+  if (value is List) return value.map(replace).toList();
+  return replace(value ?? '0.0.0.0');
 }

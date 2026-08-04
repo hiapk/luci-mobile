@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:luci_mobile/main.dart';
 import 'package:luci_mobile/models/luci_menu_item.dart';
 import 'package:luci_mobile/screens/luci_native_screens.dart';
+import 'package:luci_mobile/screens/luci_extended_native_screens.dart';
 import 'package:luci_mobile/screens/luci_standard_native_screens.dart';
 import 'package:luci_mobile/screens/luci_webview_screen.dart';
 import 'package:luci_mobile/screens/router_tools_screen.dart';
@@ -128,6 +129,26 @@ class _LuciMenuScreenState extends ConsumerState<LuciMenuScreen> {
       LuciNativeDestination.mountPoints => const RouterMountPointsScreen(),
       LuciNativeDestination.ledSettings => const RouterLedSettingsScreen(),
       LuciNativeDestination.ddns => const RouterDdnsScreen(),
+      LuciNativeDestination.switchConfiguration => const RouterSwitchScreen(),
+      LuciNativeDestination.packageManager =>
+        const RouterPackageManagerScreen(),
+      LuciNativeDestination.storageManagement => RouterStorageManagementScreen(
+        onOpenAdvanced: openAdvanced,
+      ),
+      LuciNativeDestination.fanControl => const RouterFanControlScreen(),
+      LuciNativeDestination.docker => RouterDockerScreen(
+        initialSection: item.key,
+      ),
+      LuciNativeDestination.systemUpdate => RouterSystemUpdateScreen(
+        onOpenAdvanced: openAdvanced,
+      ),
+      LuciNativeDestination.backupFirmware => RouterBackupFirmwareScreen(
+        onOpenAdvanced: openAdvanced,
+      ),
+      LuciNativeDestination.fileTransfer => const RouterFileManagerScreen(),
+      LuciNativeDestination.systemTuning => RouterSystemTuningScreen(
+        onOpenAdvanced: openAdvanced,
+      ),
       LuciNativeDestination.dashboard => null,
       LuciNativeDestination.interfaces => null,
     };
