@@ -159,23 +159,11 @@ class LuciNavigationPolicy {
         path.startsWith('admin/nas/')) {
       return LuciNativeDestination.storageManagement;
     }
-    if (path == 'admin/system/luci-fan') {
-      return LuciNativeDestination.fanControl;
-    }
-    if (path == 'admin/docker' || path.startsWith('admin/docker/')) {
-      return LuciNativeDestination.docker;
-    }
-    if (path == 'admin/system/ota') {
-      return LuciNativeDestination.systemUpdate;
-    }
     if (path == 'admin/system/flash') {
       return LuciNativeDestination.backupFirmware;
     }
     if (path == 'admin/system/filetransfer') {
       return LuciNativeDestination.fileTransfer;
-    }
-    if (path == 'admin/system/tuning') {
-      return LuciNativeDestination.systemTuning;
     }
     return null;
   }

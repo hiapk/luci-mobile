@@ -89,17 +89,11 @@ void main() {
             LuciNativeDestination.packageManager,
         const ['admin', 'system', 'diskman']:
             LuciNativeDestination.storageManagement,
-        const ['admin', 'system', 'luci-fan']: LuciNativeDestination.fanControl,
         const ['admin', 'nas']: LuciNativeDestination.storageManagement,
         const ['admin', 'nas', 'mergerfs']:
             LuciNativeDestination.storageManagement,
         const ['admin', 'nas', 'cifs']: LuciNativeDestination.storageManagement,
         const ['admin', 'nas', 'nfs']: LuciNativeDestination.storageManagement,
-        const ['admin', 'docker', 'containers']: LuciNativeDestination.docker,
-        const ['admin', 'docker', 'images']: LuciNativeDestination.docker,
-        const ['admin', 'docker', 'networks']: LuciNativeDestination.docker,
-        const ['admin', 'docker', 'volumes']: LuciNativeDestination.docker,
-        const ['admin', 'docker', 'events']: LuciNativeDestination.docker,
       };
 
       for (final entry in expected.entries) {
@@ -113,6 +107,23 @@ void main() {
           LuciNavigationPolicy.nativeDestinationFor(menuItem),
           entry.value,
           reason: entry.key.join('/'),
+        );
+      }
+    });
+
+    test('uses WebView only for native pages rejected by router ACLs', () {
+      for (final path in [
+        const ['admin', 'docker'],
+        const ['admin', 'docker', 'containers'],
+        const ['admin', 'system', 'luci-fan'],
+        const ['admin', 'system', 'ota'],
+        const ['admin', 'system', 'tuning'],
+        const ['admin', 'system', 'tuning', 'ipk'],
+      ]) {
+        expect(
+          LuciNavigationPolicy.presentationFor(item(path.last, path)),
+          LuciPagePresentation.webView,
+          reason: path.join('/'),
         );
       }
     });
