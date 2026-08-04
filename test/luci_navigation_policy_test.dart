@@ -149,7 +149,6 @@ void main() {
     test('keeps complex applications in the authenticated WebView', () {
       for (final path in [
         const ['admin', 'store'],
-        const ['admin', 'services', 'openclash'],
         const ['admin', 'services', 'linkease'],
       ]) {
         expect(
@@ -158,6 +157,23 @@ void main() {
           reason: path.join('/'),
         );
       }
+    });
+
+    test('routes OpenClash to its native overview and proxy screen', () {
+      final openClash = item('openclash', const [
+        'admin',
+        'services',
+        'openclash',
+      ]);
+
+      expect(
+        LuciNavigationPolicy.presentationFor(openClash),
+        LuciPagePresentation.nativePage,
+      );
+      expect(
+        LuciNavigationPolicy.nativeDestinationFor(openClash),
+        LuciNativeDestination.openClash,
+      );
     });
 
     test('opens iStore directly instead of exposing its status API', () {

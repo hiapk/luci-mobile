@@ -11,12 +11,14 @@ import 'package:luci_mobile/services/throughput_service.dart';
 import 'package:luci_mobile/models/client.dart';
 import 'package:luci_mobile/models/router.dart' as model;
 import 'package:luci_mobile/models/dashboard_preferences.dart';
+import 'package:luci_mobile/models/openclash.dart';
 import 'package:luci_mobile/services/interfaces/auth_service_interface.dart';
 import 'package:luci_mobile/services/interfaces/api_service_interface.dart';
 import 'package:luci_mobile/services/api_service.dart';
 import 'package:luci_mobile/services/client_list_policy.dart';
 import 'package:luci_mobile/services/luci_auth_protocol.dart';
 import 'package:luci_mobile/services/luci_native_parsers.dart';
+import 'package:luci_mobile/services/openclash_api_service.dart';
 import 'package:luci_mobile/services/service_factory.dart';
 import 'package:luci_mobile/config/app_config.dart';
 import 'package:luci_mobile/utils/http_client_manager.dart';
@@ -32,6 +34,9 @@ class AppState extends ChangeNotifier {
   RouterService? _routerService;
   ThroughputService? _throughputService;
   final HttpClientManager _httpClientManager = HttpClientManager();
+  late final OpenClashApiService _openClashApiService = OpenClashApiService(
+    httpClientManager: _httpClientManager,
+  );
   final ClientListCache _clientListCache = ClientListCache();
 
   // Reviewer mode state
@@ -285,6 +290,93 @@ class AppState extends ChangeNotifier {
         cookieName: cookieName,
         useHttps: _authService!.useHttps,
       ),
+    );
+  }
+
+  ({model.Router router, LuciSession session}) _openClashRequestContext() {
+    final router = _routerService?.selectedRouter;
+    final token = _authService?.sysauth;
+    final cookieName = _authService?.cookieName;
+    if (router == null || token == null || cookieName == null) {
+      throw StateError('当前没有可用的 LuCI 登录会话。');
+    }
+    return (
+      router: router,
+      session: LuciSession(
+        token: token,
+        cookieName: cookieName,
+        useHttps: router.useHttps,
+      ),
+    );
+  }
+
+  Future<OpenClashOverview> fetchOpenClashOverview({BuildContext? context}) {
+    final request = _openClashRequestContext();
+    return _openClashApiService.fetchOverview(
+      host: request.router.ipAddress,
+      useHttps: request.router.useHttps,
+      session: request.session,
+      context: context,
+    );
+  }
+
+  Future<OpenClashProxySnapshot> fetchOpenClashProxies({
+    BuildContext? context,
+  }) {
+    final request = _openClashRequestContext();
+    return _openClashApiService.fetchProxies(
+      host: request.router.ipAddress,
+      useHttps: request.router.useHttps,
+      session: request.session,
+      context: context,
+    );
+  }
+
+  Future<void> selectOpenClashProxy(
+    String group,
+    String proxy, {
+    BuildContext? context,
+  }) {
+    final request = _openClashRequestContext();
+    return _openClashApiService.selectProxy(
+      host: request.router.ipAddress,
+      useHttps: request.router.useHttps,
+      session: request.session,
+      group: group,
+      proxy: proxy,
+      context: context,
+    );
+  }
+
+  Future<Map<String, dynamic>> testOpenClashDelay({
+    required String kind,
+    required String name,
+    String? provider,
+    BuildContext? context,
+  }) {
+    final request = _openClashRequestContext();
+    return _openClashApiService.testDelay(
+      host: request.router.ipAddress,
+      useHttps: request.router.useHttps,
+      session: request.session,
+      kind: kind,
+      name: name,
+      provider: provider,
+      context: context,
+    );
+  }
+
+  Future<OpenClashMode> switchOpenClashMode(
+    OpenClashMode mode, {
+    BuildContext? context,
+  }) {
+    final request = _openClashRequestContext();
+    return _openClashApiService.switchMode(
+      host: request.router.ipAddress,
+      useHttps: request.router.useHttps,
+      session: request.session,
+      mode: mode,
+      context: context,
     );
   }
 

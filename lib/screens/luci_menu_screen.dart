@@ -8,6 +8,7 @@ import 'package:luci_mobile/screens/luci_native_screens.dart';
 import 'package:luci_mobile/screens/luci_extended_native_screens.dart';
 import 'package:luci_mobile/screens/luci_standard_native_screens.dart';
 import 'package:luci_mobile/screens/luci_webview_screen.dart';
+import 'package:luci_mobile/screens/openclash_native_screen.dart';
 import 'package:luci_mobile/screens/router_tools_screen.dart';
 import 'package:luci_mobile/services/luci_menu_service.dart';
 import 'package:luci_mobile/services/luci_navigation_policy.dart';
@@ -149,6 +150,7 @@ class _LuciMenuScreenState extends ConsumerState<LuciMenuScreen> {
       LuciNativeDestination.systemTuning => RouterSystemTuningScreen(
         onOpenAdvanced: openAdvanced,
       ),
+      LuciNativeDestination.openClash => const OpenClashNativeScreen(),
       LuciNativeDestination.dashboard => null,
       LuciNativeDestination.interfaces => null,
     };
