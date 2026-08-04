@@ -971,18 +971,6 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  Future<Map<String, dynamic>> fetchFanOverview({BuildContext? context}) async {
-    final results = await Future.wait([
-      fetchUciSections('luci-fan', context: context),
-      _checkedExecFile(
-        '/usr/bin/sensors',
-        const [],
-        context: context?.mounted == true ? context : null,
-      ),
-    ]);
-    return {'config': results[0], 'sensors': results[1]};
-  }
-
   Future<Map<String, dynamic>> fetchSystemUpdateOverview({
     BuildContext? context,
   }) async {

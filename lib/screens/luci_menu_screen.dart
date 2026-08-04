@@ -12,6 +12,7 @@ import 'package:luci_mobile/screens/router_tools_screen.dart';
 import 'package:luci_mobile/services/luci_menu_service.dart';
 import 'package:luci_mobile/services/luci_navigation_policy.dart';
 import 'package:luci_mobile/state/app_state.dart';
+import 'package:luci_mobile/widgets/native_navigation_bar.dart';
 
 class LuciMenuScreen extends ConsumerStatefulWidget {
   const LuciMenuScreen({super.key});
@@ -135,7 +136,6 @@ class _LuciMenuScreenState extends ConsumerState<LuciMenuScreen> {
       LuciNativeDestination.storageManagement => RouterStorageManagementScreen(
         onOpenAdvanced: openAdvanced,
       ),
-      LuciNativeDestination.fanControl => const RouterFanControlScreen(),
       LuciNativeDestination.docker => RouterDockerScreen(
         initialSection: item.key,
       ),
@@ -259,7 +259,8 @@ class _LuciMenuScreenState extends ConsumerState<LuciMenuScreen> {
       backgroundColor: CupertinoColors.systemGroupedBackground.resolveFrom(
         context,
       ),
-      navigationBar: CupertinoNavigationBar(
+      navigationBar: NativeNavigationBar(
+        context: context,
         middle: const Text('LuCI 管理'),
         trailing: CupertinoButton(
           padding: EdgeInsets.zero,
@@ -353,7 +354,8 @@ class _LuciSubmenuScreen extends StatelessWidget {
       backgroundColor: CupertinoColors.systemGroupedBackground.resolveFrom(
         context,
       ),
-      navigationBar: CupertinoNavigationBar(
+      navigationBar: NativeNavigationBar(
+        context: context,
         middle: Text(item.title),
         previousPageTitle: 'LuCI',
       ),

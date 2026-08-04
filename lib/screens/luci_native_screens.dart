@@ -5,6 +5,7 @@ import 'package:flutter/material.dart' show SelectableText;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:luci_mobile/main.dart';
 import 'package:luci_mobile/screens/luci_standard_native_screens.dart';
+import 'package:luci_mobile/widgets/native_navigation_bar.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class RouterRoutesScreen extends ConsumerStatefulWidget {
@@ -228,7 +229,10 @@ class _RouterDiagnosticsScreenState
       backgroundColor: CupertinoColors.systemGroupedBackground.resolveFrom(
         context,
       ),
-      navigationBar: const CupertinoNavigationBar(middle: Text('网络诊断')),
+      navigationBar: NativeNavigationBar(
+        context: context,
+        middle: const Text('网络诊断'),
+      ),
       child: SafeArea(
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
@@ -727,7 +731,10 @@ class _RouterRebootScreenState extends ConsumerState<RouterRebootScreen> {
       backgroundColor: CupertinoColors.systemGroupedBackground.resolveFrom(
         context,
       ),
-      navigationBar: const CupertinoNavigationBar(middle: Text('重启')),
+      navigationBar: NativeNavigationBar(
+        context: context,
+        middle: const Text('重启'),
+      ),
       child: SafeArea(
         child: Center(
           child: Padding(

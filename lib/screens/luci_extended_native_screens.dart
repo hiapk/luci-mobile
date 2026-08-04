@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:luci_mobile/main.dart';
 import 'package:luci_mobile/screens/luci_standard_native_screens.dart';
 import 'package:luci_mobile/services/luci_native_parsers.dart';
+import 'package:luci_mobile/widgets/native_navigation_bar.dart';
 
 class RouterPackageManagerScreen extends ConsumerStatefulWidget {
   const RouterPackageManagerScreen({super.key});
@@ -646,7 +647,8 @@ class _DockerCreateScreenState extends State<_DockerCreateScreen> {
   @override
   Widget build(BuildContext context) {
     return CupertinoPageScaffold(
-      navigationBar: CupertinoNavigationBar(
+      navigationBar: NativeNavigationBar(
+        context: context,
         middle: const Text('创建容器'),
         trailing: CupertinoButton(
           padding: EdgeInsets.zero,
@@ -989,167 +991,6 @@ class _RouterStorageManagementScreenState
         }).toList(),
       ),
     ];
-  }
-}
-
-class RouterFanControlScreen extends ConsumerStatefulWidget {
-  const RouterFanControlScreen({super.key});
-
-  @override
-  ConsumerState<RouterFanControlScreen> createState() =>
-      _RouterFanControlScreenState();
-}
-
-class _RouterFanControlScreenState
-    extends ConsumerState<RouterFanControlScreen> {
-  late Future<Map<String, dynamic>> _future = _load();
-  bool _busy = false;
-
-  Future<Map<String, dynamic>> _load() =>
-      ref.read(appStateProvider).fetchFanOverview(context: context);
-
-  void _reload() => setState(() => _future = _load());
-
-  Future<void> _set(
-    String section,
-    Map<String, dynamic> values,
-    String key,
-    String value,
-  ) async {
-    setState(() => _busy = true);
-    try {
-      await ref.read(appStateProvider).setUciSection('luci-fan', section, {
-        ...values,
-        key: value,
-      }, context: context);
-      if (mounted) _reload();
-    } catch (error) {
-      if (mounted) await showNativeRouterError(context, error);
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return NativeRouterScaffold(
-      title: '风扇控制',
-      onRefresh: _reload,
-      child: FutureBuilder<Map<String, dynamic>>(
-        future: _future,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting &&
-              !snapshot.hasData) {
-            return const NativeRouterLoading();
-          }
-          if (snapshot.hasError) {
-            return NativeRouterError(error: snapshot.error, onRetry: _reload);
-          }
-          final data = snapshot.data ?? const {};
-          final entries = _map(data['config']).entries
-              .where((entry) => entry.value is Map)
-              .map((entry) => MapEntry(entry.key, _map(entry.value)))
-              .toList();
-          final sensors = data['sensors']?.toString() ?? '';
-          return ListView(
-            padding: const EdgeInsets.only(top: 12, bottom: 24),
-            children: [
-              ...entries.map((entry) {
-                final values = entry.value;
-                return CupertinoListSection.insetGrouped(
-                  header: const Text('温控策略'),
-                  children: [
-                    CupertinoListTile(
-                      title: const Text('启用自动风扇'),
-                      trailing: _busy
-                          ? const CupertinoActivityIndicator()
-                          : CupertinoSwitch(
-                              value: _bool(values['enabled']),
-                              onChanged: (value) => _set(
-                                entry.key,
-                                values,
-                                'enabled',
-                                value ? '1' : '0',
-                              ),
-                            ),
-                    ),
-                    _editableValueTile(
-                      '启动温度',
-                      '${values['on_temp'] ?? '-'} °C',
-                      () => _promptTemperature(entry.key, values, 'on_temp'),
-                    ),
-                    _editableValueTile(
-                      '停止温度',
-                      '${values['off_temp'] ?? '-'} °C',
-                      () => _promptTemperature(entry.key, values, 'off_temp'),
-                    ),
-                  ],
-                );
-              }),
-              CupertinoListSection.insetGrouped(
-                header: const Text('硬件传感器'),
-                children: [
-                  CupertinoListTile(
-                    title: Text(
-                      sensors.isEmpty ? '未返回传感器数据' : sensors,
-                      style: const TextStyle(fontFamily: 'Menlo', fontSize: 11),
-                      maxLines: 16,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    onTap: sensors.isEmpty
-                        ? null
-                        : () => Navigator.of(context).push(
-                            CupertinoPageRoute<void>(
-                              builder: (_) => _NativeTextViewerScreen(
-                                title: '传感器',
-                                text: sensors,
-                              ),
-                            ),
-                          ),
-                  ),
-                ],
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _editableValueTile(String title, String value, VoidCallback onTap) {
-    return CupertinoListTile(
-      title: Text(title),
-      additionalInfo: Text(value),
-      trailing: const CupertinoListTileChevron(),
-      onTap: _busy ? null : onTap,
-    );
-  }
-
-  Future<void> _promptTemperature(
-    String section,
-    Map<String, dynamic> values,
-    String key,
-  ) async {
-    final value = await promptNativeRouterText(
-      context,
-      title: key == 'on_temp' ? '启动温度' : '停止温度',
-      initialValue: values[key]?.toString() ?? '',
-      keyboardType: TextInputType.number,
-    );
-    if (value == null || !mounted) return;
-    final temperature = int.tryParse(value);
-    if (temperature == null || temperature < 0 || temperature > 120) {
-      await showNativeRouterError(context, '温度必须是 0-120 之间的整数。');
-      return;
-    }
-    if (key == 'off_temp') {
-      final onTemperature = int.tryParse(values['on_temp']?.toString() ?? '');
-      if (onTemperature != null && temperature >= onTemperature) {
-        await showNativeRouterError(context, '停止温度必须低于启动温度。');
-        return;
-      }
-    }
-    await _set(section, values, key, value);
   }
 }
 
@@ -1575,7 +1416,7 @@ class _NativeTextViewerScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return CupertinoPageScaffold(
-      navigationBar: CupertinoNavigationBar(middle: Text(title)),
+      navigationBar: NativeNavigationBar(context: context, middle: Text(title)),
       child: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(16),

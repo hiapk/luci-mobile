@@ -4,6 +4,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart' show SelectableText;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:luci_mobile/main.dart';
+import 'package:luci_mobile/widgets/native_navigation_bar.dart';
 
 class RouterToolsScreen extends StatelessWidget {
   const RouterToolsScreen({super.key});
@@ -34,8 +35,9 @@ class RouterToolsScreen extends StatelessWidget {
       backgroundColor: CupertinoColors.systemGroupedBackground.resolveFrom(
         context,
       ),
-      navigationBar: const CupertinoNavigationBar(
-        middle: Text('管理工具'),
+      navigationBar: NativeNavigationBar(
+        context: context,
+        middle: const Text('管理工具'),
         previousPageTitle: '更多',
       ),
       child: SafeArea(
@@ -102,7 +104,8 @@ class _RouterLogsScreenState extends ConsumerState<RouterLogsScreen> {
   Widget build(BuildContext context) {
     return CupertinoPageScaffold(
       backgroundColor: CupertinoColors.systemBackground.resolveFrom(context),
-      navigationBar: CupertinoNavigationBar(
+      navigationBar: NativeNavigationBar(
+        context: context,
         middle: const Text('日志'),
         previousPageTitle: '管理工具',
         trailing: CupertinoButton(
@@ -219,7 +222,8 @@ class _RouterProcessesScreenState extends ConsumerState<RouterProcessesScreen> {
       backgroundColor: CupertinoColors.systemGroupedBackground.resolveFrom(
         context,
       ),
-      navigationBar: CupertinoNavigationBar(
+      navigationBar: NativeNavigationBar(
+        context: context,
         middle: const Text('进程'),
         previousPageTitle: '管理工具',
         trailing: CupertinoButton(
@@ -320,7 +324,8 @@ class _ProcessDetailsScreen extends StatelessWidget {
       backgroundColor: CupertinoColors.systemGroupedBackground.resolveFrom(
         context,
       ),
-      navigationBar: CupertinoNavigationBar(
+      navigationBar: NativeNavigationBar(
+        context: context,
         middle: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
         previousPageTitle: '进程',
       ),
@@ -482,7 +487,8 @@ class _RouterStartupServicesScreenState
       backgroundColor: CupertinoColors.systemGroupedBackground.resolveFrom(
         context,
       ),
-      navigationBar: CupertinoNavigationBar(
+      navigationBar: NativeNavigationBar(
+        context: context,
         middle: const Text('启动服务'),
         previousPageTitle: '管理工具',
         trailing: CupertinoButton(

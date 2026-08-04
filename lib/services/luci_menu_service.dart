@@ -188,7 +188,6 @@ class LuciMenuService {
       'cifs': '网络共享挂载',
       'nfs': 'NFS 共享',
       'diskman': '磁盘管理',
-      'luci-fan': '风扇控制',
       'ota': '系统更新',
       'tuning': '高级调优',
       'filetransfer': '文件传输',

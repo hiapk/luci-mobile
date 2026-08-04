@@ -124,7 +124,6 @@ void main() {
       for (final path in [
         const ['admin', 'docker'],
         const ['admin', 'docker', 'containers'],
-        const ['admin', 'system', 'luci-fan'],
         const ['admin', 'system', 'ota'],
         const ['admin', 'system', 'tuning'],
         const ['admin', 'system', 'tuning', 'ipk'],
@@ -137,10 +136,11 @@ void main() {
       }
     });
 
-    test('hides the legacy network guide child', () {
+    test('hides unavailable LuCI child pages', () {
       final visible = LuciNavigationPolicy.filterVisibleChildren([
         item('network', const ['admin', 'network', 'network']),
         item('interfaceconfig', const ['admin', 'network', 'interfaceconfig']),
+        item('luci-fan', const ['admin', 'system', 'luci-fan']),
       ]);
 
       expect(visible.map((entry) => entry.key), ['network']);

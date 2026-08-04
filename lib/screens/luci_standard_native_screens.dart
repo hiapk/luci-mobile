@@ -1,6 +1,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:luci_mobile/main.dart';
+import 'package:luci_mobile/widgets/native_navigation_bar.dart';
 
 class RouterFirewallStatusScreen extends ConsumerStatefulWidget {
   const RouterFirewallStatusScreen({super.key});
@@ -472,7 +473,8 @@ class _WirelessSectionEditorScreenState
             'key': '密码（留空保持不变）',
           };
     return CupertinoPageScaffold(
-      navigationBar: CupertinoNavigationBar(
+      navigationBar: NativeNavigationBar(
+        context: context,
         middle: Text(_radio ? '编辑射频' : '编辑无线网络'),
         trailing: CupertinoButton(
           padding: EdgeInsets.zero,
@@ -658,7 +660,8 @@ class _RouteEditorScreenState extends State<_RouteEditorScreen> {
   @override
   Widget build(BuildContext context) {
     return CupertinoPageScaffold(
-      navigationBar: CupertinoNavigationBar(
+      navigationBar: NativeNavigationBar(
+        context: context,
         middle: const Text('添加路由'),
         trailing: CupertinoButton(
           padding: EdgeInsets.zero,
@@ -1310,7 +1313,8 @@ class _FirewallEntryEditorScreenState
     };
     final fixedType = widget.config['.type'] != null && widget.canDelete;
     return CupertinoPageScaffold(
-      navigationBar: CupertinoNavigationBar(
+      navigationBar: NativeNavigationBar(
+        context: context,
         middle: const Text('防火墙配置'),
         trailing: CupertinoButton(
           padding: EdgeInsets.zero,
@@ -1584,7 +1588,10 @@ class RouterAdministrationScreen extends StatelessWidget {
       backgroundColor: CupertinoColors.systemGroupedBackground.resolveFrom(
         context,
       ),
-      navigationBar: const CupertinoNavigationBar(middle: Text('管理权')),
+      navigationBar: NativeNavigationBar(
+        context: context,
+        middle: const Text('管理权'),
+      ),
       child: SafeArea(
         child: ListView(
           padding: const EdgeInsets.only(top: 18, bottom: 24),
@@ -1884,7 +1891,10 @@ class _RouterPasswordScreenState extends ConsumerState<_RouterPasswordScreen> {
   @override
   Widget build(BuildContext context) {
     return CupertinoPageScaffold(
-      navigationBar: const CupertinoNavigationBar(middle: Text('路由器密码')),
+      navigationBar: NativeNavigationBar(
+        context: context,
+        middle: const Text('路由器密码'),
+      ),
       child: SafeArea(
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 20, 16, 24),
@@ -2502,7 +2512,8 @@ class _NativeFieldsEditorScaffold extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return CupertinoPageScaffold(
-      navigationBar: CupertinoNavigationBar(
+      navigationBar: NativeNavigationBar(
+        context: context,
         middle: Text(title),
         trailing: CupertinoButton(
           padding: EdgeInsets.zero,
@@ -2561,7 +2572,8 @@ class _RouterTextFileEditorScreenState
   @override
   Widget build(BuildContext context) {
     return CupertinoPageScaffold(
-      navigationBar: CupertinoNavigationBar(
+      navigationBar: NativeNavigationBar(
+        context: context,
         middle: Text(widget.title),
         trailing: CupertinoButton(
           padding: EdgeInsets.zero,
@@ -2609,10 +2621,8 @@ class NativeRouterScaffold extends StatelessWidget {
     );
     return CupertinoPageScaffold(
       backgroundColor: backgroundColor,
-      navigationBar: CupertinoNavigationBar(
-        backgroundColor: backgroundColor,
-        automaticBackgroundVisibility: false,
-        brightness: CupertinoTheme.brightnessOf(context),
+      navigationBar: NativeNavigationBar(
+        context: context,
         middle: Text(title),
         trailing:
             trailing ??

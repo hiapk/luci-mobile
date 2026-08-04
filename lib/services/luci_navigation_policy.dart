@@ -31,7 +31,6 @@ enum LuciNativeDestination {
   switchConfiguration,
   packageManager,
   storageManagement,
-  fanControl,
   docker,
   systemUpdate,
   backupFirmware,
@@ -45,7 +44,7 @@ class LuciNavigationPolicy {
     'network_guide',
     'vpn',
   };
-  static const Set<String> _hiddenChildKeys = {'interfaceconfig'};
+  static const Set<String> _hiddenChildKeys = {'interfaceconfig', 'luci-fan'};
 
   static List<LuciMenuItem> filterVisibleRoots(List<LuciMenuItem> items) {
     return items
