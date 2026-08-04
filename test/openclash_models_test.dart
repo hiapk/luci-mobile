@@ -74,6 +74,29 @@ void main() {
     expect(node.history.map((entry) => entry.delay), [82, 95]);
   });
 
+  test('treats Lua empty-table history as an empty list', () {
+    final node = OpenClashProxyNode.fromJson({
+      'name': 'DIRECT',
+      'type': 'Direct',
+      'alive': false,
+      'history': <String, dynamic>{},
+    });
+
+    expect(node.history, isEmpty);
+  });
+
+  test('treats Lua empty-table snapshot collections as empty lists', () {
+    final snapshot = OpenClashProxySnapshot.fromJson({
+      'groups': <String, dynamic>{},
+      'nodes': <String, dynamic>{},
+      'providers': <String, dynamic>{},
+    });
+
+    expect(snapshot.groups, isEmpty);
+    expect(snapshot.nodes, isEmpty);
+    expect(snapshot.providers, isEmpty);
+  });
+
   test('normalizes invalid or missing numeric values', () {
     final overview = OpenClashOverview.fromJson({
       'running': false,

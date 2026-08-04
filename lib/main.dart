@@ -8,6 +8,7 @@ import 'package:luci_mobile/screens/login_screen.dart';
 import 'package:luci_mobile/screens/main_screen.dart';
 import 'package:luci_mobile/screens/settings_screen.dart';
 import 'package:luci_mobile/screens/splash_screen.dart';
+import 'package:luci_mobile/widgets/luci_cupertino_text_scope.dart';
 
 void main() {
   runApp(ProviderScope(child: const LuCIApp()));
@@ -56,6 +57,8 @@ class LuCIApp extends ConsumerWidget {
         ),
       ),
       themeMode: appState.themeMode,
+      builder: (context, child) =>
+          LuciCupertinoTextScope(child: child ?? const SizedBox.shrink()),
       initialRoute: '/splash',
       routes: {
         '/splash': (context) => const SplashScreen(),

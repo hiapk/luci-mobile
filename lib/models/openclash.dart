@@ -36,6 +36,10 @@ List<String> _stringList(Object? value) {
       .toList(growable: false);
 }
 
+List<dynamic> _listValue(Object? value) {
+  return value is List ? value : const [];
+}
+
 class OpenClashOverview {
   final bool running;
   final String version;
@@ -125,7 +129,7 @@ class OpenClashProxyNode {
       udp: _boolValue(json['udp']),
       xudp: _boolValue(json['xudp']),
       tfo: _boolValue(json['tfo']),
-      history: (json['history'] as List? ?? const [])
+      history: _listValue(json['history'])
           .whereType<Map>()
           .map(
             (entry) => OpenClashDelayHistoryEntry.fromJson(
@@ -186,7 +190,7 @@ class OpenClashProxySnapshot {
   });
 
   factory OpenClashProxySnapshot.fromJson(Map<String, dynamic> json) {
-    final groups = (json['groups'] as List? ?? const [])
+    final groups = _listValue(json['groups'])
         .whereType<Map>()
         .map(
           (entry) => OpenClashProxyGroup.fromJson(
@@ -195,7 +199,7 @@ class OpenClashProxySnapshot {
         )
         .where((group) => group.name.isNotEmpty)
         .toList(growable: false);
-    final nodeList = (json['nodes'] as List? ?? const [])
+    final nodeList = _listValue(json['nodes'])
         .whereType<Map>()
         .map(
           (entry) => OpenClashProxyNode.fromJson(
@@ -203,7 +207,7 @@ class OpenClashProxySnapshot {
           ),
         )
         .where((node) => node.name.isNotEmpty);
-    final providers = (json['providers'] as List? ?? const [])
+    final providers = _listValue(json['providers'])
         .whereType<Map>()
         .map(
           (entry) => OpenClashProxyProvider.fromJson(

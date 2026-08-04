@@ -2,6 +2,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:luci_mobile/main.dart';
 import 'package:luci_mobile/widgets/native_navigation_bar.dart';
+import 'package:luci_mobile/widgets/luci_cupertino_text_scope.dart';
 
 class RouterFirewallStatusScreen extends ConsumerStatefulWidget {
   const RouterFirewallStatusScreen({super.key});
@@ -2619,20 +2620,22 @@ class NativeRouterScaffold extends StatelessWidget {
     final backgroundColor = CupertinoColors.systemGroupedBackground.resolveFrom(
       context,
     );
-    return CupertinoPageScaffold(
-      backgroundColor: backgroundColor,
-      navigationBar: NativeNavigationBar(
-        context: context,
-        middle: Text(title),
-        trailing:
-            trailing ??
-            CupertinoButton(
-              padding: EdgeInsets.zero,
-              onPressed: onRefresh,
-              child: const Icon(CupertinoIcons.refresh, size: 21),
-            ),
+    return LuciCupertinoTextScope(
+      child: CupertinoPageScaffold(
+        backgroundColor: backgroundColor,
+        navigationBar: NativeNavigationBar(
+          context: context,
+          middle: Text(title),
+          trailing:
+              trailing ??
+              CupertinoButton(
+                padding: EdgeInsets.zero,
+                onPressed: onRefresh,
+                child: const Icon(CupertinoIcons.refresh, size: 21),
+              ),
+        ),
+        child: SafeArea(child: child),
       ),
-      child: SafeArea(child: child),
     );
   }
 }

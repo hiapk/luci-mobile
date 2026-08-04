@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:luci_mobile/screens/luci_menu_screen.dart';
 import 'package:luci_mobile/screens/openclash_native_screen.dart';
 import 'package:luci_mobile/screens/luci_standard_native_screens.dart';
+import 'package:luci_mobile/widgets/luci_cupertino_text_scope.dart';
 
 Future<void> pumpDarkPage(WidgetTester tester, Widget page) async {
   await tester.pumpWidget(
@@ -89,6 +90,44 @@ void main() {
     await tester.pumpAndSettle();
 
     expectNavigationBarMatchesPage(tester);
+  });
+
+  testWidgets('native router pages supply a Cupertino default text style', (
+    tester,
+  ) async {
+    await pumpDarkPage(
+      tester,
+      NativeRouterScaffold(
+        title: '软件包',
+        onRefresh: () {},
+        child: const Text('软件包列表'),
+      ),
+    );
+
+    final textContext = tester.element(find.text('软件包列表'));
+    final style = DefaultTextStyle.of(textContext).style;
+
+    expect(style.decoration, isNot(TextDecoration.underline));
+    expect(style.fontSize, isNot(48));
+    expect(style.color, isNot(const Color(0xD0FF0000)));
+  });
+
+  testWidgets('app text scope fixes direct Cupertino page scaffolds', (
+    tester,
+  ) async {
+    await pumpDarkPage(
+      tester,
+      const LuciCupertinoTextScope(
+        child: CupertinoPageScaffold(child: Text('系统日志')),
+      ),
+    );
+
+    final textContext = tester.element(find.text('系统日志'));
+    final style = DefaultTextStyle.of(textContext).style;
+
+    expect(style.decoration, isNot(TextDecoration.underline));
+    expect(style.fontSize, isNot(48));
+    expect(style.color, isNot(const Color(0xD0FF0000)));
   });
 
   testWidgets('LuCI menu navigation bar uses the dark page background', (
