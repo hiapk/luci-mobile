@@ -4,6 +4,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart' show SelectableText;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:luci_mobile/main.dart';
+import 'package:luci_mobile/screens/luci_standard_native_screens.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class RouterRoutesScreen extends ConsumerStatefulWidget {
@@ -759,19 +760,10 @@ class _NativeScaffold extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return CupertinoPageScaffold(
-      backgroundColor: CupertinoColors.systemGroupedBackground.resolveFrom(
-        context,
-      ),
-      navigationBar: CupertinoNavigationBar(
-        middle: Text(title),
-        trailing: CupertinoButton(
-          padding: EdgeInsets.zero,
-          onPressed: onRefresh,
-          child: const Icon(CupertinoIcons.refresh, size: 21),
-        ),
-      ),
-      child: SafeArea(child: child),
+    return NativeRouterScaffold(
+      title: title,
+      onRefresh: onRefresh,
+      child: child,
     );
   }
 }

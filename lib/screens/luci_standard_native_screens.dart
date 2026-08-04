@@ -2604,11 +2604,15 @@ class NativeRouterScaffold extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final backgroundColor = CupertinoColors.systemGroupedBackground.resolveFrom(
+      context,
+    );
     return CupertinoPageScaffold(
-      backgroundColor: CupertinoColors.systemGroupedBackground.resolveFrom(
-        context,
-      ),
+      backgroundColor: backgroundColor,
       navigationBar: CupertinoNavigationBar(
+        backgroundColor: backgroundColor,
+        automaticBackgroundVisibility: false,
+        brightness: CupertinoTheme.brightnessOf(context),
         middle: Text(title),
         trailing:
             trailing ??
