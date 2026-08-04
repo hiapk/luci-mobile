@@ -99,12 +99,20 @@ class OpenClashProxyNode {
   final String type;
   final int? delay;
   final bool alive;
+  final bool udp;
+  final bool xudp;
+  final bool tfo;
+  final List<OpenClashDelayHistoryEntry> history;
 
   const OpenClashProxyNode({
     required this.name,
     required this.type,
     required this.delay,
     required this.alive,
+    required this.udp,
+    required this.xudp,
+    required this.tfo,
+    required this.history,
   });
 
   factory OpenClashProxyNode.fromJson(Map<String, dynamic> json) {
@@ -114,6 +122,31 @@ class OpenClashProxyNode {
       type: json['type']?.toString() ?? '',
       delay: rawDelay > 0 ? rawDelay : null,
       alive: _boolValue(json['alive'], fallback: rawDelay > 0),
+      udp: _boolValue(json['udp']),
+      xudp: _boolValue(json['xudp']),
+      tfo: _boolValue(json['tfo']),
+      history: (json['history'] as List? ?? const [])
+          .whereType<Map>()
+          .map(
+            (entry) => OpenClashDelayHistoryEntry.fromJson(
+              entry.map((key, value) => MapEntry(key.toString(), value)),
+            ),
+          )
+          .toList(growable: false),
+    );
+  }
+}
+
+class OpenClashDelayHistoryEntry {
+  final String time;
+  final int delay;
+
+  const OpenClashDelayHistoryEntry({required this.time, required this.delay});
+
+  factory OpenClashDelayHistoryEntry.fromJson(Map<String, dynamic> json) {
+    return OpenClashDelayHistoryEntry(
+      time: json['time']?.toString() ?? '',
+      delay: _nonNegativeInt(json['delay']),
     );
   }
 }
@@ -191,4 +224,42 @@ class OpenClashProxySnapshot {
   String toString() =>
       'OpenClashProxySnapshot(groups: ${groups.length}, '
       'nodes: ${nodes.length}, providers: ${providers.length})';
+}
+
+class OpenClashIpInfo {
+  final String ip;
+  final String country;
+  final String city;
+  final String asn;
+  final String organization;
+
+  const OpenClashIpInfo({
+    required this.ip,
+    required this.country,
+    required this.city,
+    required this.asn,
+    required this.organization,
+  });
+
+  factory OpenClashIpInfo.fromIpSbJson(Map<String, dynamic> json) {
+    return OpenClashIpInfo(
+      ip: json['ip']?.toString() ?? '',
+      country: json['country']?.toString() ?? '',
+      city: json['city']?.toString() ?? '',
+      asn: json['asn']?.toString() ?? '',
+      organization: json['asn_organization']?.toString() ?? '',
+    );
+  }
+}
+
+class OpenClashLatencyResult {
+  final String name;
+  final Uri target;
+  final int? delay;
+
+  const OpenClashLatencyResult({
+    required this.name,
+    required this.target,
+    required this.delay,
+  });
 }

@@ -9,6 +9,7 @@ local M = {}
 local STATUS_MARKER = "__LUCI_MOBILE_MIHOMO_STATUS__"
 local TEST_URL = "https://www.gstatic.com/generate_204"
 local MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+local MAX_HISTORY_ENTRIES = 10
 
 local function error_result(status, message)
   return nil, { status = status, message = message }
@@ -143,6 +144,23 @@ local function latest_delay(proxy)
   return 0
 end
 
+local function sanitized_history(proxy)
+  local result = {}
+  if type(proxy) ~= "table" or type(proxy.history) ~= "table" then return result end
+  local first = math.max(1, #proxy.history - MAX_HISTORY_ENTRIES + 1)
+  for index = first, #proxy.history do
+    local entry = proxy.history[index]
+    local delay = type(entry) == "table" and tonumber(entry.delay) or nil
+    if delay and delay >= 0 then
+      result[#result + 1] = {
+        time = tostring(entry.time or ""):sub(1, 64),
+        delay = math.floor(delay),
+      }
+    end
+  end
+  return result
+end
+
 local function node_record(name, proxy)
   local delay = latest_delay(proxy)
   local alive = proxy.alive
@@ -152,6 +170,10 @@ local function node_record(name, proxy)
     type = tostring(proxy.type or ""),
     delay = delay,
     alive = alive,
+    udp = proxy.udp == true,
+    xudp = proxy.xudp == true,
+    tfo = proxy.tfo == true,
+    history = sanitized_history(proxy),
   }
 end
 

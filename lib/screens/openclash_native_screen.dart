@@ -7,12 +7,20 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:luci_mobile/main.dart';
 import 'package:luci_mobile/models/openclash.dart';
 import 'package:luci_mobile/services/luci_auth_protocol.dart';
+import 'package:luci_mobile/services/openclash_network_service.dart';
 import 'package:luci_mobile/widgets/native_navigation_bar.dart';
 
 enum _MetaCubePage { overview, nodes }
 
 class MetaCubeXdScreen extends ConsumerStatefulWidget {
-  const MetaCubeXdScreen({super.key});
+  final bool loadOnInit;
+  final OpenClashNetworkService? networkService;
+
+  const MetaCubeXdScreen({
+    super.key,
+    this.loadOnInit = true,
+    this.networkService,
+  });
 
   @override
   ConsumerState<MetaCubeXdScreen> createState() => _MetaCubeXdScreenState();
@@ -25,6 +33,7 @@ class _MetaCubeXdScreenState extends ConsumerState<MetaCubeXdScreen> {
   final TextEditingController _searchController = TextEditingController();
   final Set<String> _expandedGroups = {};
   final Set<String> _pendingActions = {};
+  late final OpenClashNetworkService _networkService;
 
   Timer? _pollTimer;
   _MetaCubePage _page = _MetaCubePage.overview;
@@ -32,8 +41,13 @@ class _MetaCubeXdScreenState extends ConsumerState<MetaCubeXdScreen> {
   OpenClashProxySnapshot? _proxySnapshot;
   Object? _overviewError;
   Object? _proxyError;
+  OpenClashIpInfo? _ipInfo;
+  List<OpenClashLatencyResult> _latencyResults = const [];
+  Object? _ipInfoError;
   bool _loadingOverview = false;
   bool _loadingProxies = false;
+  bool _loadingIpInfo = false;
+  bool _testingLatencies = false;
   bool _switchingMode = false;
   double _uploadRate = 0;
   double _downloadRate = 0;
@@ -43,7 +57,9 @@ class _MetaCubeXdScreenState extends ConsumerState<MetaCubeXdScreen> {
   @override
   void initState() {
     super.initState();
+    _networkService = widget.networkService ?? OpenClashNetworkService();
     _searchController.addListener(_searchChanged);
+    if (!widget.loadOnInit) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       unawaited(_initialLoad());
@@ -68,11 +84,48 @@ class _MetaCubeXdScreenState extends ConsumerState<MetaCubeXdScreen> {
   }
 
   Future<void> _initialLoad() async {
-    await _loadOverview();
+    await Future.wait([_loadOverview(), _loadDeviceNetwork()]);
   }
 
-  Future<void> _refreshCurrentPage() {
-    return _page == _MetaCubePage.overview ? _loadOverview() : _loadProxies();
+  Future<void> _refreshCurrentPage() async {
+    if (_page == _MetaCubePage.nodes) {
+      await _loadProxies();
+      return;
+    }
+    await Future.wait([_loadOverview(), _loadDeviceNetwork()]);
+  }
+
+  Future<void> _loadDeviceNetwork() async {
+    await Future.wait([_loadIpInfo(), _testNetworkLatencies()]);
+  }
+
+  Future<void> _loadIpInfo() async {
+    if (_loadingIpInfo) return;
+    if (mounted) setState(() => _loadingIpInfo = true);
+    try {
+      final info = await _networkService.fetchIpInfo();
+      if (!mounted) return;
+      setState(() {
+        _ipInfo = info;
+        _ipInfoError = null;
+      });
+    } catch (error) {
+      if (mounted) setState(() => _ipInfoError = error);
+    } finally {
+      if (mounted) setState(() => _loadingIpInfo = false);
+    }
+  }
+
+  Future<void> _testNetworkLatencies() async {
+    if (_testingLatencies) return;
+    if (mounted) setState(() => _testingLatencies = true);
+    try {
+      final results = await _networkService.testLatencies();
+      if (!mounted) return;
+      setState(() => _latencyResults = results);
+    } finally {
+      if (mounted) setState(() => _testingLatencies = false);
+    }
   }
 
   Future<void> _loadOverview() async {
@@ -252,56 +305,67 @@ class _MetaCubeXdScreenState extends ConsumerState<MetaCubeXdScreen> {
     final background = CupertinoColors.systemGroupedBackground.resolveFrom(
       context,
     );
-    return CupertinoPageScaffold(
-      backgroundColor: background,
-      navigationBar: NativeNavigationBar(
-        context: context,
-        middle: const Text('MetaCubeXD'),
-        trailing: CupertinoButton(
-          padding: EdgeInsets.zero,
-          onPressed: _loadingOverview || _loadingProxies
-              ? null
-              : () => unawaited(_refreshCurrentPage()),
-          child: const Icon(CupertinoIcons.refresh, size: 21),
+    final textStyle = CupertinoTheme.of(context).textTheme.textStyle.copyWith(
+      color: CupertinoColors.label.resolveFrom(context),
+      decoration: TextDecoration.none,
+    );
+    return DefaultTextStyle(
+      style: textStyle,
+      child: CupertinoPageScaffold(
+        backgroundColor: background,
+        navigationBar: NativeNavigationBar(
+          context: context,
+          middle: const Text('MetaCubeXD'),
+          trailing: CupertinoButton(
+            padding: EdgeInsets.zero,
+            onPressed:
+                _loadingOverview ||
+                    _loadingProxies ||
+                    _loadingIpInfo ||
+                    _testingLatencies
+                ? null
+                : () => unawaited(_refreshCurrentPage()),
+            child: const Icon(CupertinoIcons.refresh, size: 21),
+          ),
         ),
-      ),
-      child: SafeArea(
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
-              child: SizedBox(
-                width: double.infinity,
-                child: CupertinoSlidingSegmentedControl<_MetaCubePage>(
-                  groupValue: _page,
-                  children: const {
-                    _MetaCubePage.overview: Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 20),
-                      child: Text('概览'),
-                    ),
-                    _MetaCubePage.nodes: Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 20),
-                      child: Text('节点'),
-                    ),
-                  },
-                  onValueChanged: (value) {
-                    if (value == null) return;
-                    setState(() => _page = value);
-                    if (value == _MetaCubePage.nodes &&
-                        _proxySnapshot == null) {
-                      unawaited(_loadProxies());
-                    }
-                  },
+        child: SafeArea(
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: CupertinoSlidingSegmentedControl<_MetaCubePage>(
+                    groupValue: _page,
+                    children: const {
+                      _MetaCubePage.overview: Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 20),
+                        child: Text('概览'),
+                      ),
+                      _MetaCubePage.nodes: Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 20),
+                        child: Text('节点'),
+                      ),
+                    },
+                    onValueChanged: (value) {
+                      if (value == null) return;
+                      setState(() => _page = value);
+                      if (value == _MetaCubePage.nodes &&
+                          _proxySnapshot == null) {
+                        unawaited(_loadProxies());
+                      }
+                    },
+                  ),
                 ),
               ),
-            ),
-            Expanded(
-              child: IndexedStack(
-                index: _page.index,
-                children: [_buildOverview(), _buildNodes()],
+              Expanded(
+                child: IndexedStack(
+                  index: _page.index,
+                  children: [_buildOverview(), _buildNodes()],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -322,7 +386,11 @@ class _MetaCubeXdScreenState extends ConsumerState<MetaCubeXdScreen> {
     return CustomScrollView(
       key: const PageStorageKey('openclash-overview'),
       slivers: [
-        CupertinoSliverRefreshControl(onRefresh: _loadOverview),
+        CupertinoSliverRefreshControl(
+          onRefresh: () async {
+            await Future.wait([_loadOverview(), _loadDeviceNetwork()]);
+          },
+        ),
         SliverPadding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
           sliver: SliverList.list(
@@ -330,6 +398,8 @@ class _MetaCubeXdScreenState extends ConsumerState<MetaCubeXdScreen> {
               _buildStatusHeader(overview),
               const SizedBox(height: 14),
               _buildMetricGrid(overview),
+              const SizedBox(height: 14),
+              _buildNetworkCards(),
               const SizedBox(height: 14),
               _TrafficChart(upload: _uploadHistory, download: _downloadHistory),
               const SizedBox(height: 14),
@@ -403,7 +473,14 @@ class _MetaCubeXdScreenState extends ConsumerState<MetaCubeXdScreen> {
             ),
           ),
           const SizedBox(width: 7),
-          Text(overview.running ? '运行中' : '已停止'),
+          Text(
+            overview.running ? '运行中' : '已停止',
+            style: TextStyle(
+              color: CupertinoColors.label.resolveFrom(context),
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
         ],
       ),
     );
@@ -445,6 +522,39 @@ class _MetaCubeXdScreenState extends ConsumerState<MetaCubeXdScreen> {
                 (metric) => SizedBox(width: width, child: _MetricCard(metric)),
               )
               .toList(growable: false),
+        );
+      },
+    );
+  }
+
+  Widget _buildNetworkCards() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final cards = [
+          _IpInfoCard(
+            info: _ipInfo,
+            error: _ipInfoError,
+            loading: _loadingIpInfo,
+            onRefresh: () => unawaited(_loadIpInfo()),
+          ),
+          _NetworkLatencyCard(
+            results: _latencyResults,
+            loading: _testingLatencies,
+            onRefresh: () => unawaited(_testNetworkLatencies()),
+          ),
+        ];
+        if (constraints.maxWidth >= 700) {
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: cards[0]),
+              const SizedBox(width: 10),
+              Expanded(child: cards[1]),
+            ],
+          );
+        }
+        return Column(
+          children: [cards[0], const SizedBox(height: 10), cards[1]],
         );
       },
     );
@@ -718,6 +828,323 @@ class _MetricCard extends StatelessWidget {
       ),
     );
   }
+}
+
+class _IpInfoCard extends StatelessWidget {
+  final OpenClashIpInfo? info;
+  final Object? error;
+  final bool loading;
+  final VoidCallback onRefresh;
+
+  const _IpInfoCard({
+    required this.info,
+    required this.error,
+    required this.loading,
+    required this.onRefresh,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return _NetworkCardShell(
+      icon: CupertinoIcons.globe,
+      title: '当前 IP',
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'IP.SB',
+            style: TextStyle(
+              color: CupertinoColors.secondaryLabel.resolveFrom(context),
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(width: 2),
+          _CardRefreshButton(loading: loading, onPressed: onRefresh),
+        ],
+      ),
+      child: _buildContent(context),
+    );
+  }
+
+  Widget _buildContent(BuildContext context) {
+    final current = info;
+    if (current == null && loading) {
+      return const Center(child: CupertinoActivityIndicator());
+    }
+    if (current == null) {
+      return Center(
+        child: Text(
+          error == null ? '暂无数据' : '无法获取当前出口 IP',
+          style: TextStyle(
+            color: CupertinoColors.secondaryLabel.resolveFrom(context),
+            fontSize: 13,
+          ),
+        ),
+      );
+    }
+    return Column(
+      children: [
+        _IpInfoRow(label: 'IP 地址', value: current.ip, emphasized: true),
+        if (current.country.isNotEmpty)
+          _IpInfoRow(label: '国家', value: current.country),
+        if (current.city.isNotEmpty)
+          _IpInfoRow(label: '城市', value: current.city),
+        if (current.organization.isNotEmpty)
+          _IpInfoRow(label: '组织', value: current.organization),
+        if (current.asn.isNotEmpty)
+          _IpInfoRow(label: 'ASN', value: 'AS${current.asn}'),
+      ],
+    );
+  }
+}
+
+class _NetworkLatencyCard extends StatelessWidget {
+  final List<OpenClashLatencyResult> results;
+  final bool loading;
+  final VoidCallback onRefresh;
+
+  const _NetworkLatencyCard({
+    required this.results,
+    required this.loading,
+    required this.onRefresh,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final successful = results
+        .map((result) => result.delay)
+        .whereType<int>()
+        .toList(growable: false);
+    final average = successful.isEmpty
+        ? null
+        : (successful.reduce((left, right) => left + right) / successful.length)
+              .round();
+    return _NetworkCardShell(
+      icon: CupertinoIcons.waveform_path_ecg,
+      title: '网络延迟',
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (average != null)
+            Text(
+              '平均 ${average}ms',
+              style: TextStyle(
+                color: _latencyColor(context, average),
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          const SizedBox(width: 2),
+          _CardRefreshButton(loading: loading, onPressed: onRefresh),
+        ],
+      ),
+      child: results.isEmpty
+          ? Center(
+              child: loading
+                  ? const CupertinoActivityIndicator()
+                  : Text(
+                      '暂无数据',
+                      style: TextStyle(
+                        color: CupertinoColors.secondaryLabel.resolveFrom(
+                          context,
+                        ),
+                        fontSize: 13,
+                      ),
+                    ),
+            )
+          : Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                for (final result in results) _LatencyResultRow(result: result),
+              ],
+            ),
+    );
+  }
+}
+
+class _NetworkCardShell extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final Widget trailing;
+  final Widget child;
+
+  const _NetworkCardShell({
+    required this.icon,
+    required this.title,
+    required this.trailing,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final surface = CupertinoColors.secondarySystemGroupedBackground
+        .resolveFrom(context);
+    final separator = CupertinoColors.separator.resolveFrom(context);
+    final accent = CupertinoColors.activeBlue.resolveFrom(context);
+    return Container(
+      height: 210,
+      padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+      decoration: BoxDecoration(
+        color: surface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: separator.withValues(alpha: 0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 18, color: accent),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              trailing,
+            ],
+          ),
+          const SizedBox(height: 10),
+          Expanded(child: child),
+        ],
+      ),
+    );
+  }
+}
+
+class _CardRefreshButton extends StatelessWidget {
+  final bool loading;
+  final VoidCallback onPressed;
+
+  const _CardRefreshButton({required this.loading, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    return CupertinoButton(
+      padding: const EdgeInsets.all(6),
+      minimumSize: const Size(30, 30),
+      onPressed: loading ? null : onPressed,
+      child: loading
+          ? const CupertinoActivityIndicator(radius: 7)
+          : const Icon(CupertinoIcons.refresh, size: 16),
+    );
+  }
+}
+
+class _IpInfoRow extends StatelessWidget {
+  final String label;
+  final String value;
+  final bool emphasized;
+
+  const _IpInfoRow({
+    required this.label,
+    required this.value,
+    this.emphasized = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final secondary = CupertinoColors.secondaryLabel.resolveFrom(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 54,
+            child: Text(
+              label,
+              style: TextStyle(fontSize: 12, color: secondary),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.end,
+              style: TextStyle(
+                fontSize: emphasized ? 13 : 12,
+                fontWeight: emphasized ? FontWeight.w600 : FontWeight.w500,
+                color: emphasized
+                    ? CupertinoColors.activeBlue.resolveFrom(context)
+                    : CupertinoColors.label.resolveFrom(context),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LatencyResultRow extends StatelessWidget {
+  final OpenClashLatencyResult result;
+
+  const _LatencyResultRow({required this.result});
+
+  @override
+  Widget build(BuildContext context) {
+    final delay = result.delay;
+    final secondary = CupertinoColors.secondaryLabel.resolveFrom(context);
+    final color = _latencyColor(context, delay);
+    final widthFactor = delay == null ? 0.0 : math.min(delay / 500, 1.0);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 7),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 72,
+            child: Text(
+              result.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12),
+            ),
+          ),
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(3),
+              child: Container(
+                height: 6,
+                color: secondary.withValues(alpha: 0.12),
+                alignment: Alignment.centerLeft,
+                child: FractionallySizedBox(
+                  widthFactor: widthFactor,
+                  child: ColoredBox(color: color),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 52,
+            child: Text(
+              delay == null ? '超时' : '${delay}ms',
+              textAlign: TextAlign.end,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: delay == null ? secondary : color,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+Color _latencyColor(BuildContext context, int? delay) {
+  if (delay == null) return CupertinoColors.systemGrey.resolveFrom(context);
+  if (delay < 100) return CupertinoColors.systemGreen.resolveFrom(context);
+  if (delay < 300) return CupertinoColors.systemOrange.resolveFrom(context);
+  return CupertinoColors.systemRed.resolveFrom(context);
 }
 
 class _TrafficChart extends StatelessWidget {
@@ -1229,11 +1656,56 @@ class _ProxyNodeTile extends StatelessWidget {
                                 : FontWeight.w400,
                           ),
                         ),
-                        if (node?.type.isNotEmpty == true) ...[
+                        if (node != null &&
+                            (node!.type.isNotEmpty ||
+                                node!.udp ||
+                                node!.xudp ||
+                                node!.tfo)) ...[
                           const SizedBox(height: 2),
-                          Text(
-                            node!.type,
-                            style: TextStyle(fontSize: 11, color: secondary),
+                          Row(
+                            children: [
+                              if (node!.udp || node!.xudp) ...[
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 4,
+                                    vertical: 1,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: CupertinoColors.systemTeal
+                                        .resolveFrom(context)
+                                        .withValues(alpha: 0.18),
+                                    borderRadius: BorderRadius.circular(3),
+                                  ),
+                                  child: Text(
+                                    'U',
+                                    style: TextStyle(
+                                      color: CupertinoColors.systemTeal
+                                          .resolveFrom(context),
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 5),
+                              ],
+                              Expanded(
+                                child: Text(
+                                  [
+                                    if (node!.xudp) 'XUDP',
+                                    if (node!.udp) 'UDP',
+                                    if (node!.tfo) 'TFO',
+                                    if (node!.type.isNotEmpty) node!.type,
+                                  ].join(' / '),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: secondary,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ],
@@ -1269,34 +1741,58 @@ class _LatencyLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final delay = node?.delay;
-    final color = delay == null
-        ? CupertinoColors.secondaryLabel.resolveFrom(context)
-        : delay <= 100
-        ? CupertinoColors.systemGreen.resolveFrom(context)
-        : delay <= 250
-        ? CupertinoColors.systemOrange.resolveFrom(context)
-        : CupertinoColors.systemRed.resolveFrom(context);
+    final color = node?.alive == false
+        ? CupertinoColors.systemRed.resolveFrom(context)
+        : _latencyColor(context, delay);
     final textColor = CupertinoColors.secondaryLabel.resolveFrom(context);
     return SizedBox(
-      width: 70,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.end,
+      width: 72,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          Container(
-            width: 7,
-            height: 7,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              Container(
+                width: 7,
+                height: 7,
+                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 5),
+              Text(
+                delay == null ? '--' : '$delay ms',
+                maxLines: 1,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: textColor,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 5),
-          Text(
-            delay == null ? '--' : '$delay ms',
-            maxLines: 1,
-            style: TextStyle(
-              fontSize: 12,
-              color: textColor,
-              fontWeight: FontWeight.w600,
+          if (node?.history.isNotEmpty == true) ...[
+            const SizedBox(height: 5),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(2),
+              child: SizedBox(
+                width: 58,
+                height: 3,
+                child: Row(
+                  children: [
+                    for (final entry in node!.history)
+                      Expanded(
+                        child: ColoredBox(
+                          color: entry.delay == 0
+                              ? CupertinoColors.systemGrey.resolveFrom(context)
+                              : _latencyColor(context, entry.delay),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
             ),
-          ),
+          ],
         ],
       ),
     );

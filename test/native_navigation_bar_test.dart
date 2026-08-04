@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:luci_mobile/screens/luci_menu_screen.dart';
+import 'package:luci_mobile/screens/openclash_native_screen.dart';
 import 'package:luci_mobile/screens/luci_standard_native_screens.dart';
 
 Future<void> pumpDarkPage(WidgetTester tester, Widget page) async {
@@ -111,6 +112,20 @@ void main() {
     );
 
     expectNavigationBarMatchesPage(tester);
+  });
+
+  testWidgets('MetaCubeXD supplies a Cupertino text style under MaterialApp', (
+    tester,
+  ) async {
+    await pumpDarkPage(tester, const MetaCubeXdScreen(loadOnInit: false));
+    await tester.pump();
+
+    final textContext = tester.element(find.text('概览'));
+    final style = DefaultTextStyle.of(textContext).style;
+
+    expect(style.decoration, isNot(TextDecoration.underline));
+    expect(style.fontSize, isNot(48));
+    expect(style.color, isNot(const Color(0xD0FF0000)));
   });
 
   test('all screens use the shared native navigation bar', () {

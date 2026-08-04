@@ -53,6 +53,27 @@ void main() {
     expect(snapshot.toString(), isNot(contains('secret')));
   });
 
+  test('preserves node capabilities and bounded latency history', () {
+    final node = OpenClashProxyNode.fromJson({
+      'name': 'US 01',
+      'type': 'VLESS',
+      'delay': 95,
+      'alive': true,
+      'udp': true,
+      'xudp': true,
+      'tfo': false,
+      'history': [
+        {'time': '2026-08-05T12:00:00Z', 'delay': 82},
+        {'time': '2026-08-05T12:05:00Z', 'delay': 95},
+      ],
+    });
+
+    expect(node.udp, isTrue);
+    expect(node.xudp, isTrue);
+    expect(node.tfo, isFalse);
+    expect(node.history.map((entry) => entry.delay), [82, 95]);
+  });
+
   test('normalizes invalid or missing numeric values', () {
     final overview = OpenClashOverview.fromJson({
       'running': false,

@@ -187,3 +187,91 @@ chown root:root /usr/lib/lua/luci/controller/luci_mobile_mihomo.lua
 chmod 0644 /usr/lib/lua/luci/controller/luci_mobile_mihomo.lua
 rm -f /tmp/luci-indexcache.*.json
 ```
+
+## 2026-08-05 - MetaCubeXD node metadata and health history
+
+### Goal and data-source decision
+
+- Match MetaCubeXD's node presentation without exposing its unrestricted
+  controller API or dashboard secret to the app.
+- Node protocol/capability and health history continue to come from Mihomo's
+  existing `/proxies` and `/providers/proxies` responses through the private,
+  router-local controller connection.
+- Current IP and Google/Cloudflare/GitHub latency are intentionally measured by
+  the app itself, matching MetaCubeXD semantics. No router endpoint, Nginx
+  proxy, OpenClash rule or firewall exception was added for those cards.
+
+The app performs these external requests only when the MetaCubeXD overview is
+opened or manually refreshed:
+
+- `GET https://api.ip.sb/geoip`
+- `HEAD https://www.google.com/generate_204`
+- `HEAD https://cp.cloudflare.com/generate_204`
+- `HEAD https://github.com`
+
+Those requests reveal the app device's current public source IP to the named
+services. They do not include a LuCI cookie, OpenClash secret or router data.
+
+### Router change
+
+Changed only the independently installed app integration model:
+
+- `/usr/lib/lua/luci/model/luci_mobile_mihomo.lua`
+
+The existing authenticated `.../luci-mobile-mihomo/proxies` response now adds
+the following explicitly allowlisted fields per node:
+
+- `udp`, `xudp` and `tfo` boolean capabilities;
+- at most the 10 newest health-history entries, each reduced to `time` and
+  non-negative integer `delay`.
+
+No arbitrary `extra` fields are forwarded. Node credentials, provider URLs,
+subscription data and the OpenClash dashboard secret remain excluded. The
+endpoint remains behind the same LuCI ACL and password-plus-TOTP session.
+
+### Operations performed
+
+1. Read the deployed model, controller and Nginx hashes before changing
+   anything.
+2. Uploaded the repository model to
+   `/tmp/luci_mobile_mihomo.model.node-health.new`.
+3. Verified the staged SHA-256 and Lua `loadfile` result before installation.
+4. Saved the previous model as
+   `/root/luci-mobile-mihomo-model-before-node-health-20260805.lua`, owned by
+   `root:root` with mode `0600`.
+5. Replaced only the app integration model, restored runtime ownership
+   `root:root` and mode `0644`, then repeated the Lua and SHA-256 checks.
+6. Removed the temporary staged file. No service or router restart occurred.
+7. Ran the model directly to validate the redacted snapshot, checked anonymous
+   HTTP access, and re-read the controller and Nginx hashes.
+8. Preserved the previous private router log and synchronized this updated
+   record to `/root/luci-mobile-change-log.md` with mode `0600`.
+
+### Verification
+
+- Previous model SHA-256:
+  `8f4fcccdfffce94a47e67864d1b6f4a8fd4c5e85a25646c1479fcfef6b8b05e0`.
+- Deployed model SHA-256:
+  `5bd001ea450f157ad85738a47b380d6f5595993a6c49b59bd0d1bdd83c1c8dba`.
+- Direct model validation returned 124 nodes: 123 advertise UDP, 3 advertise
+  XUDP, 0 advertise TFO, and 120 contain bounded health history.
+- Every returned node had boolean capability fields, a history table, and no
+  more than 10 history entries.
+- Anonymous HTTPS access to the proxy snapshot returned HTTP 403.
+- Controller SHA-256 stayed
+  `755a8825b83b6d2c039542eab10a0ac9a67abcd33745592f839493293cb1e423`.
+- Nginx LuCI locations SHA-256 stayed
+  `6a13396895833ff88c47e14ff00e086a6ab7c4723fe538f0fa7d750eba48ac1c`.
+
+### Rollback
+
+Restore only the private model backup; Nginx, OpenClash, firewall and the LuCI
+controller need no rollback:
+
+```sh
+cp /root/luci-mobile-mihomo-model-before-node-health-20260805.lua \
+  /usr/lib/lua/luci/model/luci_mobile_mihomo.lua
+chown root:root /usr/lib/lua/luci/model/luci_mobile_mihomo.lua
+chmod 0644 /usr/lib/lua/luci/model/luci_mobile_mihomo.lua
+lua -e 'assert(loadfile("/usr/lib/lua/luci/model/luci_mobile_mihomo.lua"))'
+```

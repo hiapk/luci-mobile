@@ -35,4 +35,16 @@ void main() {
       ),
     );
   });
+
+  test('proxy snapshot allowlists capabilities and latency history', () {
+    final source = File(
+      'router/luci-mobile-mihomo/usr/lib/lua/luci/model/'
+      'luci_mobile_mihomo.lua',
+    ).readAsStringSync();
+
+    expect(source, contains('udp = proxy.udp == true'));
+    expect(source, contains('xudp = proxy.xudp == true'));
+    expect(source, contains('tfo = proxy.tfo == true'));
+    expect(source, contains('history = sanitized_history(proxy)'));
+  });
 }
