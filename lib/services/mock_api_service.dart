@@ -134,6 +134,18 @@ class MockApiService implements IApiService {
   }
 
   @override
+  Future<String> execDirect(
+    String ipAddress,
+    String sysauth,
+    bool useHttps, {
+    required String command,
+    List<String> arguments = const [],
+    BuildContext? context,
+  }) async {
+    return 'Aug 04 12:00:00 mock.info luci-mobile: $command';
+  }
+
+  @override
   Future<bool> reboot(
     String ipAddress,
     String sysauth,

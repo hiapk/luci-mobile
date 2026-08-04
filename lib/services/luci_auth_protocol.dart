@@ -42,6 +42,18 @@ class LuciRpcRequest {
   });
 }
 
+class LuciCgiExecRequest {
+  final String path;
+  final Map<String, String> headers;
+  final Map<String, String> fields;
+
+  const LuciCgiExecRequest({
+    required this.path,
+    required this.headers,
+    required this.fields,
+  });
+}
+
 class LuciAuthProtocol {
   static Map<String, String> loginFields({
     required String username,
@@ -116,6 +128,29 @@ class LuciAuthProtocol {
           params ?? <String, dynamic>{},
         ],
       },
+    );
+  }
+
+  static LuciCgiExecRequest cgiExecRequest({
+    required LuciSession session,
+    required String command,
+    List<String> arguments = const [],
+  }) {
+    String escape(String value) => value
+        .replaceAll('\\', '\\\\')
+        .replaceAllMapped(RegExp(r'\s'), (match) => '\\${match.group(0)}');
+
+    final commandLine = <String>[
+      escape(command),
+      ...arguments.map(escape),
+    ].join(' ');
+    return LuciCgiExecRequest(
+      path: '/cgi-bin/cgi-exec',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Cookie': '${session.cookieName}=${session.token}',
+      },
+      fields: {'sessionid': session.token, 'command': commandLine},
     );
   }
 }

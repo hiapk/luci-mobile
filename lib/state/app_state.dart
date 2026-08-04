@@ -295,25 +295,24 @@ class AppState extends ChangeNotifier {
   }
 
   Future<List<String>> fetchSystemLogs({BuildContext? context}) async {
-    final result = await _callCurrentRouter(
-      'log',
-      'read',
-      params: {'lines': 1000, 'oneshot': true, 'stream': false},
+    final router = _routerService?.selectedRouter;
+    final token = _authService?.sysauth;
+    if (router == null || token == null) {
+      throw StateError('当前没有可用的路由器会话。');
+    }
+    final output = await _apiService!.execDirect(
+      router.ipAddress,
+      token,
+      router.useHttps,
+      command: '/usr/libexec/syslog-wrapper',
       context: context,
     );
-    final data = _rpcDataMap(result);
-    final entries = data?['log'];
-    if (entries is! List) return [];
-    return entries.reversed.map((entry) {
-      if (entry is! Map) return entry.toString();
-      final message = entry['msg']?.toString() ?? '';
-      final seconds = num.tryParse(entry['time']?.toString() ?? '');
-      if (seconds == null) return message;
-      final time = DateTime.fromMillisecondsSinceEpoch(
-        (seconds * 1000).round(),
-      ).toLocal();
-      return '[${time.toString().split('.').first}] $message';
-    }).toList();
+    return const LineSplitter()
+        .convert(output)
+        .where((line) => line.trim().isNotEmpty)
+        .toList()
+        .reversed
+        .toList();
   }
 
   Future<List<String>> fetchKernelLogs({BuildContext? context}) async {
@@ -474,31 +473,32 @@ class AppState extends ChangeNotifier {
     final result = await _execFile(command, params, context: context);
     final output = result['stdout']?.toString() ?? '';
     final error = result['stderr']?.toString() ?? '';
-    return [output.trim(), error.trim()]
-        .where((part) => part.isNotEmpty)
-        .join('\n');
+    return [
+      output.trim(),
+      error.trim(),
+    ].where((part) => part.isNotEmpty).join('\n');
   }
 
   Future<Map<String, dynamic>> fetchAppFilterOverview({
     BuildContext? context,
   }) async {
     final results = await Future.wait([
-      _callCurrentRouter(
-        'appfilter',
-        'get_oaf_status',
-        context: context,
-      ),
+      _callCurrentRouter('appfilter', 'get_oaf_status', context: context),
       _callCurrentRouter('appfilter', 'dev_list', context: context),
-      _callCurrentRouter(
-        'appfilter',
-        'get_app_filter_base',
-        context: context,
-      ),
+      _callCurrentRouter('appfilter', 'get_app_filter_base', context: context),
+      _callCurrentRouter('appfilter', 'class_list', context: context),
+      _callCurrentRouter('appfilter', 'get_app_filter_time', context: context),
+      _callCurrentRouter('appfilter', 'get_app_filter_adv', context: context),
+      _callCurrentRouter('appfilter', 'get_all_users', context: context),
     ]);
     return {
       'status': _rpcDataMap(results[0])?['data'] ?? const {},
       'devices': _rpcDataMap(results[1])?['devlist'] ?? const [],
       'base': _rpcDataMap(results[2])?['data'] ?? const {},
+      'classes': _rpcDataMap(results[3])?['class_list'] ?? const [],
+      'schedule': _rpcDataMap(results[4])?['data'] ?? const {},
+      'advanced': _rpcDataMap(results[5])?['data'] ?? const {},
+      'users': _rpcDataMap(results[6])?['data'] ?? const {},
     };
   }
 
@@ -525,6 +525,35 @@ class AppState extends ChangeNotifier {
     );
   }
 
+  Future<void> setAppFilterAdvanced(
+    Map<String, dynamic> values, {
+    BuildContext? context,
+  }) async {
+    await _callCurrentRouter(
+      'appfilter',
+      'set_app_filter_adv',
+      params: {
+        'lan_ifname': values['lan_ifname'] ?? 'br-lan',
+        'tcp_rst': values['tcp_rst'] ?? 0,
+        'disable_hnat': values['disable_hnat'] ?? 0,
+        'auto_load_engine': values['auto_load_engine'] ?? 0,
+      },
+      context: context,
+    );
+  }
+
+  Future<void> setAppFilterSchedule(
+    Map<String, dynamic> values, {
+    BuildContext? context,
+  }) async {
+    await _callCurrentRouter(
+      'appfilter',
+      'set_app_filter_time',
+      params: values,
+      context: context,
+    );
+  }
+
   Future<List<Map<String, dynamic>>> fetchHddIdleSettings({
     BuildContext? context,
   }) async {
@@ -539,9 +568,7 @@ class AppState extends ChangeNotifier {
     return values.values
         .whereType<Map>()
         .map(
-          (entry) => entry.map(
-            (key, value) => MapEntry(key.toString(), value),
-          ),
+          (entry) => entry.map((key, value) => MapEntry(key.toString(), value)),
         )
         .where((entry) => entry['.type'] == 'hd-idle')
         .toList();
@@ -600,7 +627,8 @@ class AppState extends ChangeNotifier {
         ),
       ]);
       status = results[0]['stdout']?.toString().trim() ?? '';
-      port = int.tryParse(results[1]['stdout']?.toString().trim() ?? '') ?? 8123;
+      port =
+          int.tryParse(results[1]['stdout']?.toString().trim() ?? '') ?? 8123;
     } catch (_) {
       // Older iStoreOS builds do not grant RPC access to the helper script.
     }
@@ -628,6 +656,283 @@ class AppState extends ChangeNotifier {
     );
     return _rpcDataMap(result) ?? const {};
   }
+
+  Future<Map<String, Map<String, dynamic>>> fetchUciSections(
+    String config, {
+    BuildContext? context,
+  }) async {
+    final result = await _callCurrentRouter(
+      'uci',
+      'get',
+      params: {'config': config},
+      context: context,
+    );
+    final values = _rpcDataMap(result)?['values'];
+    if (values is! Map) return {};
+    return values.map((key, value) {
+      final section = value is Map
+          ? value.map((k, v) => MapEntry(k.toString(), v))
+          : <String, dynamic>{};
+      return MapEntry(key.toString(), section);
+    });
+  }
+
+  Future<void> setUciSection(
+    String config,
+    String section,
+    Map<String, dynamic> values, {
+    BuildContext? context,
+  }) async {
+    await _callCurrentRouter(
+      'uci',
+      'set',
+      params: {
+        'config': config,
+        'section': section,
+        'values': _uciWritableValues(values),
+      },
+      context: context,
+    );
+    await _applyPendingUciChanges(
+      context: context?.mounted == true ? context : null,
+    );
+  }
+
+  Future<void> addUciSection(
+    String config,
+    String type,
+    Map<String, dynamic> values, {
+    BuildContext? context,
+  }) async {
+    await _callCurrentRouter(
+      'uci',
+      'add',
+      params: {
+        'config': config,
+        'type': type,
+        'values': _uciWritableValues(values),
+      },
+      context: context,
+    );
+    await _applyPendingUciChanges(
+      context: context?.mounted == true ? context : null,
+    );
+  }
+
+  Future<void> deleteUciSection(
+    String config,
+    String section, {
+    BuildContext? context,
+  }) async {
+    await _callCurrentRouter(
+      'uci',
+      'delete',
+      params: {'config': config, 'section': section},
+      context: context,
+    );
+    await _applyPendingUciChanges(
+      context: context?.mounted == true ? context : null,
+    );
+  }
+
+  Future<void> _applyPendingUciChanges({BuildContext? context}) async {
+    await _callCurrentRouter(
+      'uci',
+      'apply',
+      params: {'rollback': true, 'timeout': 30},
+      context: context?.mounted == true ? context : null,
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 800));
+    await _callCurrentRouter(
+      'uci',
+      'confirm',
+      context: context?.mounted == true ? context : null,
+    );
+  }
+
+  Future<String> readRouterFile(String path, {BuildContext? context}) async {
+    final result = await _callCurrentRouter(
+      'file',
+      'read',
+      params: {'path': path},
+      context: context,
+    );
+    return _rpcDataMap(result)?['data']?.toString() ?? '';
+  }
+
+  Future<void> writeRouterFile(
+    String path,
+    String data, {
+    BuildContext? context,
+  }) async {
+    await _callCurrentRouter(
+      'file',
+      'write',
+      params: {'path': path, 'data': data},
+      context: context,
+    );
+  }
+
+  Future<Map<String, dynamic>> fetchFirewallStatus({
+    BuildContext? context,
+  }) async {
+    final result = await _execFile('/usr/sbin/nft', const [
+      '--terse',
+      '--json',
+      'list',
+      'ruleset',
+    ], context: context);
+    final output = result['stdout']?.toString() ?? '';
+    if (output.isEmpty) return const {};
+    final decoded = jsonDecode(output);
+    if (decoded is! Map) return const {};
+    final objects = decoded['nftables'];
+    final entries = objects is List
+        ? objects.whereType<Map>().toList()
+        : const <Map>[];
+    int count(String key) => entries.where((entry) => entry[key] is Map).length;
+    return {
+      'tables': count('table'),
+      'chains': count('chain'),
+      'rules': count('rule'),
+      'sets': count('set'),
+      'entries': entries,
+    };
+  }
+
+  Future<Map<String, dynamic>> fetchChannelAnalysis({
+    BuildContext? context,
+  }) async {
+    final wireless = await fetchUciSections('wireless', context: context);
+    final radios = wireless.entries
+        .where((entry) => entry.value['.type'] == 'wifi-device')
+        .toList();
+    final results = <Map<String, dynamic>>[];
+    for (final radio in radios) {
+      final infoResult = await _callCurrentRouter(
+        'iwinfo',
+        'info',
+        params: {'device': radio.key},
+        context: context?.mounted == true ? context : null,
+      );
+      final frequenciesResult = await _callCurrentRouter(
+        'iwinfo',
+        'freqlist',
+        params: {'device': radio.key},
+        context: context?.mounted == true ? context : null,
+      );
+      results.add({
+        'name': radio.key,
+        'config': radio.value,
+        'info': _rpcDataMap(infoResult) ?? const {},
+        'frequencies': _rpcDataMap(frequenciesResult) ?? const {},
+      });
+    }
+    return {'radios': results};
+  }
+
+  Future<Map<String, dynamic>> fetchWireGuardStatus({
+    BuildContext? context,
+  }) async {
+    final result = await _callCurrentRouter(
+      'luci.wireguard',
+      'getWgInstances',
+      context: context,
+    );
+    return _rpcDataMap(result) ?? const {};
+  }
+
+  Future<Map<String, dynamic>> fetchSystemSettings({
+    BuildContext? context,
+  }) async {
+    final config = await fetchUciSections('system', context: context);
+    final results = await Future.wait([
+      _callCurrentRouter(
+        'system',
+        'info',
+        context: context?.mounted == true ? context : null,
+      ),
+      _callCurrentRouter(
+        'luci',
+        'getTimezones',
+        context: context?.mounted == true ? context : null,
+      ),
+    ]);
+    return {
+      'config': config,
+      'info': _rpcDataMap(results[0]) ?? const {},
+      'timezones': _rpcDataMap(results[1]) ?? const {},
+    };
+  }
+
+  Future<Map<String, dynamic>> fetchMountPoints({BuildContext? context}) async {
+    final results = await Future.wait([
+      _callCurrentRouter('luci', 'getMountPoints', context: context),
+      _callCurrentRouter('luci', 'getBlockDevices', context: context),
+      fetchUciSections('fstab', context: context),
+    ]);
+    return {
+      'mounts': _rpcDataMap(results[0])?['result'] ?? const [],
+      'devices': _rpcDataMap(results[1]) ?? const {},
+      'config': results[2],
+    };
+  }
+
+  Future<Map<String, dynamic>> fetchLedSettings({BuildContext? context}) async {
+    final results = await Future.wait([
+      _callCurrentRouter('luci', 'getLEDs', context: context),
+      fetchUciSections('system', context: context),
+    ]);
+    return {'leds': _rpcDataMap(results[0]) ?? const {}, 'config': results[1]};
+  }
+
+  Future<Map<String, dynamic>> fetchDhcpDnsOverview({
+    BuildContext? context,
+  }) async {
+    final results = await Future.wait([
+      _callCurrentRouter('luci-rpc', 'getDHCPLeases', context: context),
+      fetchUciSections('dhcp', context: context),
+    ]);
+    final leases = _rpcDataMap(results[0]) ?? const {};
+    return {
+      'leases': leases['dhcp_leases'] ?? const [],
+      'leases6': leases['dhcp6_leases'] ?? const [],
+      'config': results[1],
+    };
+  }
+
+  Future<Map<String, dynamic>> fetchDdnsOverview({
+    BuildContext? context,
+  }) async {
+    final results = await Future.wait([
+      _callCurrentRouter('luci.ddns', 'get_services_status', context: context),
+      fetchUciSections('ddns', context: context),
+    ]);
+    return {
+      'status': _rpcDataMap(results[0]) ?? const {},
+      'config': results[1],
+    };
+  }
+
+  Future<void> setRouterPassword(
+    String password, {
+    BuildContext? context,
+  }) async {
+    if (password.length < 6) throw const FormatException('密码至少需要 6 位。');
+    await _callCurrentRouter(
+      'luci',
+      'setPassword',
+      params: {'username': 'root', 'password': password},
+      context: context,
+    );
+  }
+
+  static Map<String, dynamic> _uciWritableValues(Map<String, dynamic> values) =>
+      Map.fromEntries(
+        values.entries.where(
+          (entry) => !entry.key.startsWith('.') && entry.value != null,
+        ),
+      );
 
   Future<void> disconnectWirelessClient(
     String macAddress, {

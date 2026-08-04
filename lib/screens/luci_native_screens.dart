@@ -146,9 +146,8 @@ class _RouterRealtimeScreenState extends ConsumerState<RouterRealtimeScreen> {
             return ((load[index] as num) / 100).toStringAsFixed(2);
           }
 
-          String countValue(int index) => connections.length > index
-              ? connections[index].toString()
-              : '-';
+          String countValue(int index) =>
+              connections.length > index ? connections[index].toString() : '-';
           return ListView(
             padding: const EdgeInsets.only(top: 12, bottom: 24),
             children: [
@@ -164,14 +163,8 @@ class _RouterRealtimeScreenState extends ConsumerState<RouterRealtimeScreen> {
                 header: const Text('连接与流量'),
                 children: [
                   _ValueTile(label: '连接数', value: countValue(1)),
-                  _ValueTile(
-                    label: '下载',
-                    value: _formatRate(data['rxRate']),
-                  ),
-                  _ValueTile(
-                    label: '上传',
-                    value: _formatRate(data['txRate']),
-                  ),
+                  _ValueTile(label: '下载', value: _formatRate(data['rxRate'])),
+                  _ValueTile(label: '上传', value: _formatRate(data['txRate'])),
                 ],
               ),
             ],
@@ -297,8 +290,7 @@ class AppFilterNativeScreen extends ConsumerStatefulWidget {
       _AppFilterNativeScreenState();
 }
 
-class _AppFilterNativeScreenState
-    extends ConsumerState<AppFilterNativeScreen> {
+class _AppFilterNativeScreenState extends ConsumerState<AppFilterNativeScreen> {
   bool _saving = false;
   late Future<Map<String, dynamic>> _future = _load();
 
@@ -314,6 +306,25 @@ class _AppFilterNativeScreenState
       await ref
           .read(appStateProvider)
           .setAppFilterEnabled(enabled, context: context);
+      if (mounted) _reload();
+    } catch (error) {
+      if (mounted) await _showOperationError(context, error);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _setAdvanced(
+    Map<String, dynamic> advanced,
+    String key,
+    bool enabled,
+  ) async {
+    setState(() => _saving = true);
+    try {
+      await ref.read(appStateProvider).setAppFilterAdvanced({
+        ...advanced,
+        key: enabled ? 1 : 0,
+      }, context: context);
       if (mounted) _reload();
     } catch (error) {
       if (mounted) await _showOperationError(context, error);
@@ -342,13 +353,34 @@ class _AppFilterNativeScreenState
             );
           }
           final data = snapshot.data ?? const {};
-          final status = data['status'] is Map ? data['status'] as Map : const {};
+          final status = data['status'] is Map
+              ? data['status'] as Map
+              : const {};
           final base = data['base'] is Map ? data['base'] as Map : const {};
           final devices = data['devices'] is List
               ? (data['devices'] as List).whereType<Map>().toList()
               : const <Map>[];
-          final enabled = (base['enable'] ?? status['config_enable']).toString() ==
-              '1';
+          final classes = data['classes'] is List
+              ? (data['classes'] as List).whereType<Map>().toList()
+              : const <Map>[];
+          final schedule = data['schedule'] is Map
+              ? (data['schedule'] as Map).map(
+                  (key, value) => MapEntry(key.toString(), value),
+                )
+              : <String, dynamic>{};
+          final advanced = data['advanced'] is Map
+              ? (data['advanced'] as Map).map(
+                  (key, value) => MapEntry(key.toString(), value),
+                )
+              : <String, dynamic>{};
+          final usersData = data['users'] is Map
+              ? data['users'] as Map
+              : const {};
+          final users = usersData['list'] is List
+              ? usersData['list'] as List
+              : const [];
+          final enabled =
+              (base['enable'] ?? status['config_enable']).toString() == '1';
           return ListView(
             padding: const EdgeInsets.only(top: 12, bottom: 24),
             children: [
@@ -385,6 +417,77 @@ class _AppFilterNativeScreenState
                   );
                 }).toList(),
               ),
+              CupertinoListSection.insetGrouped(
+                header: const Text('过滤计划'),
+                children: [
+                  _ValueTile(
+                    label: '时段',
+                    value:
+                        '${schedule['start_time'] ?? '00:00'} - ${schedule['end_time'] ?? '23:59'}',
+                  ),
+                  _ValueTile(
+                    label: '生效星期',
+                    value: schedule['weekday_list'] is List
+                        ? (schedule['weekday_list'] as List).join(', ')
+                        : '-',
+                  ),
+                  _ValueTile(label: '已识别用户', value: '${users.length}'),
+                ],
+              ),
+              CupertinoListSection.insetGrouped(
+                header: const Text('高级设置'),
+                children: [
+                  _ValueTile(
+                    label: 'LAN 接口',
+                    value: advanced['lan_ifname']?.toString() ?? 'br-lan',
+                  ),
+                  CupertinoListTile(
+                    title: const Text('停用硬件加速'),
+                    trailing: CupertinoSwitch(
+                      value: advanced['disable_hnat'].toString() == '1',
+                      onChanged: _saving
+                          ? null
+                          : (value) =>
+                                _setAdvanced(advanced, 'disable_hnat', value),
+                    ),
+                  ),
+                  CupertinoListTile(
+                    title: const Text('阻断时重置 TCP 连接'),
+                    trailing: CupertinoSwitch(
+                      value: advanced['tcp_rst'].toString() == '1',
+                      onChanged: _saving
+                          ? null
+                          : (value) => _setAdvanced(advanced, 'tcp_rst', value),
+                    ),
+                  ),
+                  CupertinoListTile(
+                    title: const Text('自动加载识别引擎'),
+                    trailing: CupertinoSwitch(
+                      value: advanced['auto_load_engine'].toString() == '1',
+                      onChanged: _saving
+                          ? null
+                          : (value) => _setAdvanced(
+                              advanced,
+                              'auto_load_engine',
+                              value,
+                            ),
+                    ),
+                  ),
+                ],
+              ),
+              if (classes.isNotEmpty)
+                CupertinoListSection.insetGrouped(
+                  header: Text('应用类别 ${classes.length}'),
+                  children: classes.map((entry) {
+                    final apps = entry['app_list'] is List
+                        ? entry['app_list'] as List
+                        : const [];
+                    return CupertinoListTile(
+                      title: Text(entry['name']?.toString() ?? '-'),
+                      additionalInfo: Text('${apps.length} 个应用'),
+                    );
+                  }).toList(),
+                ),
               _AdvancedButton(onPressed: widget.onOpenAdvanced),
             ],
           );
@@ -483,10 +586,7 @@ class _HddIdleNativeScreenState extends ConsumerState<HddIdleNativeScreen> {
 class HomeAssistantNativeScreen extends ConsumerStatefulWidget {
   final VoidCallback onOpenAdvanced;
 
-  const HomeAssistantNativeScreen({
-    super.key,
-    required this.onOpenAdvanced,
-  });
+  const HomeAssistantNativeScreen({super.key, required this.onOpenAdvanced});
 
   @override
   ConsumerState<HomeAssistantNativeScreen> createState() =>
@@ -537,7 +637,9 @@ class _HomeAssistantNativeScreenState
             );
           }
           final data = snapshot.data ?? const {};
-          final config = data['config'] is Map ? data['config'] as Map : const {};
+          final config = data['config'] is Map
+              ? data['config'] as Map
+              : const {};
           final running = data['status'] == 'running';
           final port = data['port'] is int ? data['port'] as int : 8123;
           return ListView(
@@ -706,10 +808,7 @@ class _AdvancedButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-      child: CupertinoButton(
-        onPressed: onPressed,
-        child: const Text('高级设置'),
-      ),
+      child: CupertinoButton(onPressed: onPressed, child: const Text('高级设置')),
     );
   }
 }
@@ -768,10 +867,7 @@ class _NativeError extends StatelessWidget {
             const SizedBox(height: 12),
             Text(error.toString(), textAlign: TextAlign.center),
             const SizedBox(height: 16),
-            CupertinoButton.filled(
-              onPressed: onRetry,
-              child: const Text('重试'),
-            ),
+            CupertinoButton.filled(onPressed: onRetry, child: const Text('重试')),
             if (onOpenAdvanced != null)
               CupertinoButton(
                 onPressed: onOpenAdvanced,

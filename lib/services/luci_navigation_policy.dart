@@ -1,6 +1,6 @@
 import 'package:luci_mobile/models/luci_menu_item.dart';
 
-enum LuciPagePresentation { nativePage, webView }
+enum LuciPagePresentation { mainTab, nativePage, webView }
 
 enum LuciNativeDestination {
   dashboard,
@@ -15,10 +15,27 @@ enum LuciNativeDestination {
   hddIdle,
   homeAssistant,
   reboot,
+  firewallStatus,
+  channelAnalysis,
+  wireGuardStatus,
+  wireless,
+  networkRoutes,
+  dhcpDns,
+  firewallConfig,
+  systemSettings,
+  administration,
+  scheduledTasks,
+  mountPoints,
+  ledSettings,
+  ddns,
 }
 
 class LuciNavigationPolicy {
-  static const Set<String> _hiddenRootKeys = {'network_guide', 'vpn'};
+  static const Set<String> _hiddenRootKeys = {
+    'quickstart',
+    'network_guide',
+    'vpn',
+  };
 
   static List<LuciMenuItem> filterVisibleRoots(List<LuciMenuItem> items) {
     return items
@@ -27,16 +44,22 @@ class LuciNavigationPolicy {
   }
 
   static LuciPagePresentation presentationFor(LuciMenuItem item) {
+    if (mainTabIndexFor(item) != null) return LuciPagePresentation.mainTab;
     return nativeDestinationFor(item) == null
         ? LuciPagePresentation.webView
         : LuciPagePresentation.nativePage;
   }
 
+  static int? mainTabIndexFor(LuciMenuItem item) {
+    final path = item.pathSegments.join('/');
+    if (path == 'admin/status/overview') return 0;
+    if (path == 'admin/network/network') return 2;
+    return null;
+  }
+
   static LuciNativeDestination? nativeDestinationFor(LuciMenuItem item) {
     final path = item.pathSegments.join('/');
-    if (path == 'admin/quickstart' ||
-        path.startsWith('admin/quickstart/') ||
-        path == 'admin/status/overview') {
+    if (path == 'admin/quickstart' || path.startsWith('admin/quickstart/')) {
       return LuciNativeDestination.dashboard;
     }
     if (path == 'admin/status/logs' || path.startsWith('admin/status/logs/')) {
@@ -51,11 +74,11 @@ class LuciNavigationPolicy {
     if (path == 'admin/system/reboot') {
       return LuciNativeDestination.reboot;
     }
-    if (path == 'admin/network/network') {
-      return LuciNativeDestination.interfaces;
-    }
-    if (path == 'admin/status/routes' || path == 'admin/network/routes') {
+    if (path == 'admin/status/routes') {
       return LuciNativeDestination.routes;
+    }
+    if (path == 'admin/network/routes') {
+      return LuciNativeDestination.networkRoutes;
     }
     if (path == 'admin/status/realtime' ||
         path.startsWith('admin/status/realtime/')) {
@@ -67,12 +90,47 @@ class LuciNavigationPolicy {
     if (path == 'admin/services/appfilter') {
       return LuciNativeDestination.appFilter;
     }
-    if (path == 'admin/services/hd_idle' ||
-        path == 'admin/services/hd-idle') {
+    if (path == 'admin/services/hd_idle' || path == 'admin/services/hd-idle') {
       return LuciNativeDestination.hddIdle;
     }
     if (path == 'admin/services/homeassistant') {
       return LuciNativeDestination.homeAssistant;
+    }
+    if (path == 'admin/status/nftables' || path == 'admin/status/iptables') {
+      return LuciNativeDestination.firewallStatus;
+    }
+    if (path == 'admin/status/channel_analysis') {
+      return LuciNativeDestination.channelAnalysis;
+    }
+    if (path == 'admin/status/wireguard') {
+      return LuciNativeDestination.wireGuardStatus;
+    }
+    if (path == 'admin/network/wireless') {
+      return LuciNativeDestination.wireless;
+    }
+    if (path == 'admin/network/dhcp') {
+      return LuciNativeDestination.dhcpDns;
+    }
+    if (path == 'admin/network/firewall') {
+      return LuciNativeDestination.firewallConfig;
+    }
+    if (path == 'admin/system/system') {
+      return LuciNativeDestination.systemSettings;
+    }
+    if (path == 'admin/system/admin') {
+      return LuciNativeDestination.administration;
+    }
+    if (path == 'admin/system/crontab') {
+      return LuciNativeDestination.scheduledTasks;
+    }
+    if (path == 'admin/system/mounts') {
+      return LuciNativeDestination.mountPoints;
+    }
+    if (path == 'admin/system/leds') {
+      return LuciNativeDestination.ledSettings;
+    }
+    if (path == 'admin/services/ddns') {
+      return LuciNativeDestination.ddns;
     }
     return null;
   }

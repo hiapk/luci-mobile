@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:luci_mobile/main.dart';
 import 'package:luci_mobile/models/luci_menu_item.dart';
 import 'package:luci_mobile/screens/luci_native_screens.dart';
+import 'package:luci_mobile/screens/luci_standard_native_screens.dart';
 import 'package:luci_mobile/screens/luci_webview_screen.dart';
 import 'package:luci_mobile/screens/router_tools_screen.dart';
 import 'package:luci_mobile/services/luci_menu_service.dart';
@@ -52,6 +53,13 @@ class _LuciMenuScreenState extends ConsumerState<LuciMenuScreen> {
   }
 
   Future<void> _openItem(AppState appState, LuciMenuItem item) async {
+    final mainTabIndex = LuciNavigationPolicy.mainTabIndexFor(item);
+    if (mainTabIndex != null) {
+      final navigator = Navigator.of(context);
+      if (navigator.canPop()) await navigator.maybePop();
+      appState.requestTab(mainTabIndex);
+      return;
+    }
     final destination = LuciNavigationPolicy.nativeDestinationFor(item);
     if (destination == LuciNativeDestination.dashboard) {
       appState.requestTab(0);
@@ -100,6 +108,26 @@ class _LuciMenuScreenState extends ConsumerState<LuciMenuScreen> {
         onOpenAdvanced: openAdvanced,
       ),
       LuciNativeDestination.reboot => const RouterRebootScreen(),
+      LuciNativeDestination.firewallStatus =>
+        const RouterFirewallStatusScreen(),
+      LuciNativeDestination.channelAnalysis =>
+        const RouterChannelAnalysisScreen(),
+      LuciNativeDestination.wireGuardStatus =>
+        const RouterWireGuardStatusScreen(),
+      LuciNativeDestination.wireless => const RouterWirelessScreen(),
+      LuciNativeDestination.networkRoutes => const RouterNetworkRoutesScreen(),
+      LuciNativeDestination.dhcpDns => const RouterDhcpDnsScreen(),
+      LuciNativeDestination.firewallConfig =>
+        const RouterFirewallConfigScreen(),
+      LuciNativeDestination.systemSettings =>
+        const RouterSystemSettingsScreen(),
+      LuciNativeDestination.administration =>
+        const RouterAdministrationScreen(),
+      LuciNativeDestination.scheduledTasks =>
+        const RouterScheduledTasksScreen(),
+      LuciNativeDestination.mountPoints => const RouterMountPointsScreen(),
+      LuciNativeDestination.ledSettings => const RouterLedSettingsScreen(),
+      LuciNativeDestination.ddns => const RouterDdnsScreen(),
       LuciNativeDestination.dashboard => null,
       LuciNativeDestination.interfaces => null,
     };

@@ -390,6 +390,47 @@ class RealApiService implements IApiService {
     );
   }
 
+  @override
+  Future<String> execDirect(
+    String ipAddress,
+    String sysauth,
+    bool useHttps, {
+    required String command,
+    List<String> arguments = const [],
+    BuildContext? context,
+  }) async {
+    final client = _createHttpClient(useHttps, ipAddress, context: context);
+    final session =
+        _sessions[_routerKey(ipAddress, useHttps)] ??
+        LuciSession(
+          token: sysauth,
+          cookieName: useHttps ? 'sysauth_https' : 'sysauth_http',
+          useHttps: useHttps,
+        );
+    final request = LuciAuthProtocol.cgiExecRequest(
+      session: session,
+      command: command,
+      arguments: arguments,
+    );
+    final response = await client.postUri<dynamic>(
+      _buildUrl(ipAddress, useHttps, request.path),
+      data: request.fields,
+      options: Options(
+        headers: request.headers,
+        responseType: ResponseType.plain,
+        followRedirects: false,
+        validateStatus: (code) => code != null && code < 500,
+      ),
+    );
+    if (response.statusCode == 403) {
+      throw const LuciSessionExpiredException('LuCI 拒绝执行该命令。');
+    }
+    if (response.statusCode != 200) {
+      throw Exception('LuCI 命令执行失败（HTTP ${response.statusCode}）。');
+    }
+    return response.data?.toString() ?? '';
+  }
+
   Future<dynamic> callWithContext(
     String ipAddress,
     String sysauth,

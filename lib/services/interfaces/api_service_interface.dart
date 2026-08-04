@@ -32,6 +32,14 @@ abstract class IApiService {
     String method,
     Map<String, dynamic> params,
   );
+  Future<String> execDirect(
+    String ipAddress,
+    String sysauth,
+    bool useHttps, {
+    required String command,
+    List<String> arguments = const [],
+    BuildContext? context,
+  });
   Future<bool> reboot(
     String ipAddress,
     String sysauth,
