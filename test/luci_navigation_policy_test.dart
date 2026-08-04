@@ -159,20 +159,30 @@ void main() {
       }
     });
 
-    test('routes OpenClash to its native overview and proxy screen', () {
+    test('keeps OpenClash in WebView and routes MetaCubeXD natively', () {
       final openClash = item('openclash', const [
         'admin',
         'services',
         'openclash',
       ]);
+      final metaCubeXd = item('metacubexd', const [
+        'admin',
+        'services',
+        'luci-mobile-mihomo',
+      ]);
 
       expect(
         LuciNavigationPolicy.presentationFor(openClash),
+        LuciPagePresentation.webView,
+      );
+      expect(LuciNavigationPolicy.nativeDestinationFor(openClash), isNull);
+      expect(
+        LuciNavigationPolicy.presentationFor(metaCubeXd),
         LuciPagePresentation.nativePage,
       );
       expect(
-        LuciNavigationPolicy.nativeDestinationFor(openClash),
-        LuciNativeDestination.openClash,
+        LuciNavigationPolicy.nativeDestinationFor(metaCubeXd),
+        LuciNativeDestination.metaCubeXd,
       );
     });
 

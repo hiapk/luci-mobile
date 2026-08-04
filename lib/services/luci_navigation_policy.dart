@@ -36,7 +36,7 @@ enum LuciNativeDestination {
   backupFirmware,
   fileTransfer,
   systemTuning,
-  openClash,
+  metaCubeXd,
 }
 
 class LuciNavigationPolicy {
@@ -119,9 +119,8 @@ class LuciNavigationPolicy {
     if (path == 'admin/services/homeassistant') {
       return LuciNativeDestination.homeAssistant;
     }
-    if (path == 'admin/services/openclash' ||
-        path.startsWith('admin/services/openclash/')) {
-      return LuciNativeDestination.openClash;
+    if (path == 'admin/services/luci-mobile-mihomo') {
+      return LuciNativeDestination.metaCubeXd;
     }
     if (path == 'admin/status/nftables' || path == 'admin/status/iptables') {
       return LuciNativeDestination.firewallStatus;

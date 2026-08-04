@@ -116,3 +116,74 @@ rm -f /tmp/luci-indexcache.*.json
 
 No Nginx, firewall, package or OpenClash vendor configuration needs to be
 restored because none was changed.
+
+## 2026-08-05 - POST subroute dispatch correction
+
+### Problem and cause
+
+The app received HTTP 405 when starting a latency test. The same routing defect
+also affected proxy selection. The controller registered the GET collection
+route `.../proxies` as a LuCI leaf. A leaf consumes the remaining path, so
+`.../proxies/delay` and `.../proxies/select` were dispatched to the GET-only
+collection action instead of their POST actions.
+
+### Decision
+
+- Keep the existing URL and authentication contract so installed app builds do
+  not need a protocol migration.
+- Remove only the leaf marker from the `.../proxies` collection route. Its two
+  mutation children remain POST-only and continue to require a matching LuCI
+  authentication cookie and `sessionid` form field.
+- Do not modify Nginx, OpenClash, Mihomo, firewall rules or vendor LuCI files.
+
+### Operations performed
+
+1. Added a repository regression test that fails whenever a collection route
+   with mutation children is marked as a leaf.
+2. Staged the corrected controller as
+   `/tmp/luci_mobile_mihomo.controller.new`, verified its SHA-256 and compiled
+   it with Lua `loadfile` before deployment.
+3. Saved the previous controller as
+   `/root/luci-mobile-mihomo-controller-before-405-fix.lua` with owner
+   `root:root` and mode `0600`.
+4. Replaced only
+   `/usr/lib/lua/luci/controller/luci_mobile_mihomo.lua`, retaining owner
+   `root:root` and mode `0644`.
+5. The first cache cleanup attempted to use `unlink`, which is absent from this
+   iStoreOS image. The controller had already been deployed successfully; the
+   script stopped before cache or staging cleanup. Cleanup was then completed
+   with explicit paths using the available BusyBox `rm` command.
+6. Removed only `/tmp/luci-indexcache.*.json` so LuCI will regenerate the route
+   index. No service or router restart occurred.
+7. Removed the temporary staged controller.
+8. Preserved the previous router log as
+   `/root/luci-mobile-change-log.before-405-fix.md` with mode `0600`, then
+   synchronized this updated record to `/root/luci-mobile-change-log.md` with
+   the same private permissions.
+
+### Verification
+
+- Deployed controller SHA-256:
+  `755a8825b83b6d2c039542eab10a0ac9a67abcd33745592f839493293cb1e423`.
+- The deployed controller passed a Lua syntax load after replacement.
+- A direct service-layer group latency test completed successfully, confirming
+  the router-to-Mihomo delay endpoint and its HTTP method are valid.
+- Anonymous GET and POST requests to `.../proxies/delay` both returned 403;
+  the change did not expose the endpoint outside an authenticated LuCI session.
+- The service model file was unchanged.
+- An authenticated HTTP mutation was not fabricated because no active app LuCI
+  cookie was collected. The app's normal password and TOTP session performs the
+  final dispatcher-level check.
+
+### Rollback
+
+Restore the private backup over the independently added controller, keep its
+normal runtime ownership and mode, then clear only the LuCI index cache:
+
+```sh
+cp /root/luci-mobile-mihomo-controller-before-405-fix.lua \
+  /usr/lib/lua/luci/controller/luci_mobile_mihomo.lua
+chown root:root /usr/lib/lua/luci/controller/luci_mobile_mihomo.lua
+chmod 0644 /usr/lib/lua/luci/controller/luci_mobile_mihomo.lua
+rm -f /tmp/luci-indexcache.*.json
+```

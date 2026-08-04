@@ -150,7 +150,7 @@ class _LuciMenuScreenState extends ConsumerState<LuciMenuScreen> {
       LuciNativeDestination.systemTuning => RouterSystemTuningScreen(
         onOpenAdvanced: openAdvanced,
       ),
-      LuciNativeDestination.openClash => const OpenClashNativeScreen(),
+      LuciNativeDestination.metaCubeXd => const MetaCubeXdScreen(),
       LuciNativeDestination.dashboard => null,
       LuciNativeDestination.interfaces => null,
     };

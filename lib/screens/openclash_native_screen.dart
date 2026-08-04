@@ -9,30 +9,25 @@ import 'package:luci_mobile/models/openclash.dart';
 import 'package:luci_mobile/services/luci_auth_protocol.dart';
 import 'package:luci_mobile/widgets/native_navigation_bar.dart';
 
-enum _OpenClashPage { overview, proxies }
+enum _MetaCubePage { overview, nodes }
 
-enum _ProxySection { groups, providers }
-
-class OpenClashNativeScreen extends ConsumerStatefulWidget {
-  const OpenClashNativeScreen({super.key});
+class MetaCubeXdScreen extends ConsumerStatefulWidget {
+  const MetaCubeXdScreen({super.key});
 
   @override
-  ConsumerState<OpenClashNativeScreen> createState() =>
-      _OpenClashNativeScreenState();
+  ConsumerState<MetaCubeXdScreen> createState() => _MetaCubeXdScreenState();
 }
 
-class _OpenClashNativeScreenState extends ConsumerState<OpenClashNativeScreen> {
+class _MetaCubeXdScreenState extends ConsumerState<MetaCubeXdScreen> {
   static const _pollInterval = Duration(seconds: 2);
   static const _historyLimit = 36;
 
   final TextEditingController _searchController = TextEditingController();
   final Set<String> _expandedGroups = {};
-  final Set<String> _expandedProviders = {};
   final Set<String> _pendingActions = {};
 
   Timer? _pollTimer;
-  _OpenClashPage _page = _OpenClashPage.overview;
-  _ProxySection _proxySection = _ProxySection.groups;
+  _MetaCubePage _page = _MetaCubePage.overview;
   OpenClashOverview? _overview;
   OpenClashProxySnapshot? _proxySnapshot;
   Object? _overviewError;
@@ -77,7 +72,7 @@ class _OpenClashNativeScreenState extends ConsumerState<OpenClashNativeScreen> {
   }
 
   Future<void> _refreshCurrentPage() {
-    return _page == _OpenClashPage.overview ? _loadOverview() : _loadProxies();
+    return _page == _MetaCubePage.overview ? _loadOverview() : _loadProxies();
   }
 
   Future<void> _loadOverview() async {
@@ -130,6 +125,16 @@ class _OpenClashNativeScreenState extends ConsumerState<OpenClashNativeScreen> {
       setState(() {
         _proxySnapshot = snapshot;
         _proxyError = null;
+        if (_expandedGroups.isEmpty && snapshot.groups.isNotEmpty) {
+          final preferred = snapshot.groups.where(
+            (group) => group.name.contains('节点选择'),
+          );
+          _expandedGroups.add(
+            preferred.isEmpty
+                ? snapshot.groups.first.name
+                : preferred.first.name,
+          );
+        }
       });
     } catch (error) {
       if (mounted) setState(() => _proxyError = error);
@@ -251,7 +256,7 @@ class _OpenClashNativeScreenState extends ConsumerState<OpenClashNativeScreen> {
       backgroundColor: background,
       navigationBar: NativeNavigationBar(
         context: context,
-        middle: const Text('OpenClash'),
+        middle: const Text('MetaCubeXD'),
         trailing: CupertinoButton(
           padding: EdgeInsets.zero,
           onPressed: _loadingOverview || _loadingProxies
@@ -267,22 +272,22 @@ class _OpenClashNativeScreenState extends ConsumerState<OpenClashNativeScreen> {
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
               child: SizedBox(
                 width: double.infinity,
-                child: CupertinoSlidingSegmentedControl<_OpenClashPage>(
+                child: CupertinoSlidingSegmentedControl<_MetaCubePage>(
                   groupValue: _page,
                   children: const {
-                    _OpenClashPage.overview: Padding(
+                    _MetaCubePage.overview: Padding(
                       padding: EdgeInsets.symmetric(horizontal: 20),
                       child: Text('概览'),
                     ),
-                    _OpenClashPage.proxies: Padding(
+                    _MetaCubePage.nodes: Padding(
                       padding: EdgeInsets.symmetric(horizontal: 20),
-                      child: Text('代理'),
+                      child: Text('节点'),
                     ),
                   },
                   onValueChanged: (value) {
                     if (value == null) return;
                     setState(() => _page = value);
-                    if (value == _OpenClashPage.proxies &&
+                    if (value == _MetaCubePage.nodes &&
                         _proxySnapshot == null) {
                       unawaited(_loadProxies());
                     }
@@ -293,7 +298,7 @@ class _OpenClashNativeScreenState extends ConsumerState<OpenClashNativeScreen> {
             Expanded(
               child: IndexedStack(
                 index: _page.index,
-                children: [_buildOverview(), _buildProxies()],
+                children: [_buildOverview(), _buildNodes()],
               ),
             ),
           ],
@@ -410,25 +415,21 @@ class _OpenClashNativeScreenState extends ConsumerState<OpenClashNativeScreen> {
         label: '上传',
         value: '${_formatBytes(_uploadRate)}/s',
         icon: CupertinoIcons.arrow_up_right,
-        color: CupertinoColors.systemGreen,
       ),
       _MetricData(
         label: '下载',
         value: '${_formatBytes(_downloadRate)}/s',
         icon: CupertinoIcons.arrow_down_left,
-        color: CupertinoColors.activeBlue,
       ),
       _MetricData(
         label: '活跃连接',
         value: '${overview.connectionCount}',
         icon: CupertinoIcons.link,
-        color: CupertinoColors.systemOrange,
       ),
       _MetricData(
         label: '内存',
         value: _formatBytes(overview.memoryBytes.toDouble()),
         icon: CupertinoIcons.layers_fill,
-        color: CupertinoColors.systemPurple,
       ),
     ];
     return LayoutBuilder(
@@ -467,7 +468,7 @@ class _OpenClashNativeScreenState extends ConsumerState<OpenClashNativeScreen> {
     );
   }
 
-  Widget _buildProxies() {
+  Widget _buildNodes() {
     final snapshot = _proxySnapshot;
     if (snapshot == null && _proxyError != null) {
       return _OpenClashError(
@@ -480,7 +481,7 @@ class _OpenClashNativeScreenState extends ConsumerState<OpenClashNativeScreen> {
     }
 
     return CustomScrollView(
-      key: const PageStorageKey('openclash-proxies'),
+      key: const PageStorageKey('metacubexd-nodes'),
       slivers: [
         CupertinoSliverRefreshControl(onRefresh: _loadProxies),
         SliverPadding(
@@ -488,30 +489,33 @@ class _OpenClashNativeScreenState extends ConsumerState<OpenClashNativeScreen> {
           sliver: SliverList.list(
             children: [
               _buildModeControl(),
-              const SizedBox(height: 12),
+              const SizedBox(height: 18),
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      '节点选择',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    '${snapshot.groups.length} 个策略',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: CupertinoColors.secondaryLabel.resolveFrom(
+                        context,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
               CupertinoSearchTextField(
                 controller: _searchController,
-                placeholder: '搜索节点或代理组',
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: CupertinoSlidingSegmentedControl<_ProxySection>(
-                  groupValue: _proxySection,
-                  children: {
-                    _ProxySection.groups: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: Text('代理组 ${snapshot.groups.length}'),
-                    ),
-                    _ProxySection.providers: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: Text('Provider ${snapshot.providers.length}'),
-                    ),
-                  },
-                  onValueChanged: (value) {
-                    if (value != null) setState(() => _proxySection = value);
-                  },
-                ),
+                placeholder: '搜索策略或节点',
               ),
               const SizedBox(height: 12),
               if (_loadingProxies)
@@ -519,10 +523,7 @@ class _OpenClashNativeScreenState extends ConsumerState<OpenClashNativeScreen> {
                   padding: EdgeInsets.only(bottom: 10),
                   child: CupertinoActivityIndicator(),
                 ),
-              if (_proxySection == _ProxySection.groups)
-                ..._buildGroupCards(snapshot)
-              else
-                ..._buildProviderCards(snapshot),
+              ..._buildGroupCards(snapshot),
               if (_proxyError != null) ...[
                 const SizedBox(height: 12),
                 _InlineError(error: _proxyError!),
@@ -586,11 +587,25 @@ class _OpenClashNativeScreenState extends ConsumerState<OpenClashNativeScreen> {
 
   List<Widget> _buildGroupCards(OpenClashProxySnapshot snapshot) {
     final query = _searchController.text.trim().toLowerCase();
-    final groups = snapshot.groups.where((group) {
-      if (query.isEmpty || group.name.toLowerCase().contains(query)) {
-        return true;
-      }
-      return group.members.any((name) => name.toLowerCase().contains(query));
+    final groups = snapshot.groups
+        .where((group) {
+          if (query.isEmpty || group.name.toLowerCase().contains(query)) {
+            return true;
+          }
+          return group.members.any(
+            (name) => name.toLowerCase().contains(query),
+          );
+        })
+        .toList(growable: false);
+    int priority(OpenClashProxyGroup group) {
+      if (group.name.contains('节点选择')) return 0;
+      if (group.name.contains('自动选择')) return 1;
+      return 2;
+    }
+
+    groups.sort((a, b) {
+      final byPriority = priority(a).compareTo(priority(b));
+      return byPriority != 0 ? byPriority : a.name.compareTo(b.name);
     });
     if (groups.isEmpty) {
       return [const _EmptyResults()];
@@ -626,68 +641,17 @@ class _OpenClashNativeScreenState extends ConsumerState<OpenClashNativeScreen> {
         )
         .toList(growable: false);
   }
-
-  List<Widget> _buildProviderCards(OpenClashProxySnapshot snapshot) {
-    final query = _searchController.text.trim().toLowerCase();
-    final providers = snapshot.providers.where((provider) {
-      if (query.isEmpty || provider.name.toLowerCase().contains(query)) {
-        return true;
-      }
-      return provider.nodeNames.any(
-        (name) => name.toLowerCase().contains(query),
-      );
-    });
-    if (providers.isEmpty) return [const _EmptyResults()];
-    return providers
-        .map(
-          (provider) => Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: _ProxyProviderCard(
-              provider: provider,
-              nodes: snapshot.nodes,
-              expanded: _expandedProviders.contains(provider.name),
-              pendingDelay: _pendingActions.contains(
-                'delay:provider:${provider.name}:${provider.name}',
-              ),
-              query: provider.name.toLowerCase().contains(query) ? '' : query,
-              onToggle: () => setState(() {
-                if (!_expandedProviders.add(provider.name)) {
-                  _expandedProviders.remove(provider.name);
-                }
-              }),
-              onTestProvider: () => unawaited(
-                _testDelay(
-                  kind: 'provider',
-                  name: provider.name,
-                  provider: provider.name,
-                ),
-              ),
-              onTestNode: (node) => unawaited(
-                _testDelay(
-                  kind: 'provider_node',
-                  name: node,
-                  provider: provider.name,
-                ),
-              ),
-              pendingActions: _pendingActions,
-            ),
-          ),
-        )
-        .toList(growable: false);
-  }
 }
 
 class _MetricData {
   final String label;
   final String value;
   final IconData icon;
-  final CupertinoDynamicColor color;
 
   const _MetricData({
     required this.label,
     required this.value,
     required this.icon,
-    required this.color,
   });
 }
 
@@ -702,7 +666,7 @@ class _MetricCard extends StatelessWidget {
         .resolveFrom(context);
     final border = CupertinoColors.separator.resolveFrom(context);
     final secondary = CupertinoColors.secondaryLabel.resolveFrom(context);
-    final color = metric.color.resolveFrom(context);
+    final accent = CupertinoColors.activeBlue.resolveFrom(context);
     return Container(
       constraints: const BoxConstraints(minHeight: 92),
       padding: const EdgeInsets.all(12),
@@ -717,10 +681,10 @@ class _MetricCard extends StatelessWidget {
             width: 38,
             height: 38,
             decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.14),
+              color: accent.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Icon(metric.icon, size: 20, color: color),
+            child: Icon(metric.icon, size: 20, color: accent),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -941,118 +905,75 @@ class _ProxyGroupCard extends StatelessWidget {
       ),
       child: Column(
         children: [
-          _ExpandableHeader(
-            title: group.name,
-            subtitle: '${group.current}  ·  $alive/${group.members.length}',
-            icon: CupertinoIcons.globe,
+          _ProxyGroupHeader(
+            group: group,
+            nodes: nodes,
+            alive: alive,
             expanded: expanded,
             busy: pendingSelection || pendingDelay,
             onToggle: onToggle,
             onTest: onTestGroup,
           ),
           if (expanded)
-            for (final name in members)
-              _ProxyNodeTile(
-                name: name,
-                node: nodes[name],
-                selected: name == group.current,
-                busy: pendingActions.contains('delay:node::$name'),
-                onTap: pendingSelection || name == group.current
-                    ? null
-                    : () => onSelect(name),
-                onTest: () => onTestNode(name),
-              ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ProxyProviderCard extends StatelessWidget {
-  final OpenClashProxyProvider provider;
-  final Map<String, OpenClashProxyNode> nodes;
-  final bool expanded;
-  final bool pendingDelay;
-  final String query;
-  final VoidCallback onToggle;
-  final VoidCallback onTestProvider;
-  final ValueChanged<String> onTestNode;
-  final Set<String> pendingActions;
-
-  const _ProxyProviderCard({
-    required this.provider,
-    required this.nodes,
-    required this.expanded,
-    required this.pendingDelay,
-    required this.query,
-    required this.onToggle,
-    required this.onTestProvider,
-    required this.onTestNode,
-    required this.pendingActions,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final surface = CupertinoColors.secondarySystemGroupedBackground
-        .resolveFrom(context);
-    final separator = CupertinoColors.separator.resolveFrom(context);
-    final names = query.isEmpty
-        ? provider.nodeNames
-        : provider.nodeNames
-              .where((name) => name.toLowerCase().contains(query))
-              .toList(growable: false);
-    final alive = provider.nodeNames
-        .where((name) => nodes[name]?.alive == true)
-        .length;
-    return Container(
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        color: surface,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: separator.withValues(alpha: 0.35)),
-      ),
-      child: Column(
-        children: [
-          _ExpandableHeader(
-            title: provider.name,
-            subtitle:
-                '${provider.vehicleType}  ·  $alive/${provider.nodeNames.length}',
-            icon: CupertinoIcons.cloud_download,
-            expanded: expanded,
-            busy: pendingDelay,
-            onToggle: onToggle,
-            onTest: onTestProvider,
-          ),
-          if (expanded)
-            for (final name in names)
-              _ProxyNodeTile(
-                name: name,
-                node: nodes[name],
-                selected: false,
-                busy: pendingActions.contains(
-                  'delay:provider_node:${provider.name}:$name',
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: CupertinoColors.systemGroupedBackground
+                    .resolveFrom(context)
+                    .withValues(alpha: 0.55),
+                border: Border(
+                  top: BorderSide(color: separator.withValues(alpha: 0.28)),
                 ),
-                onTest: () => onTestNode(name),
               ),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final columns = constraints.maxWidth >= 560 ? 2 : 1;
+                  const gap = 8.0;
+                  final width =
+                      (constraints.maxWidth - gap * (columns - 1)) / columns;
+                  return Wrap(
+                    spacing: gap,
+                    runSpacing: gap,
+                    children: [
+                      for (final name in members)
+                        SizedBox(
+                          width: width,
+                          child: _ProxyNodeTile(
+                            name: name,
+                            node: nodes[name],
+                            selected: name == group.current,
+                            busy: pendingActions.contains('delay:node::$name'),
+                            onTap: pendingSelection || name == group.current
+                                ? null
+                                : () => onSelect(name),
+                            onTest: () => onTestNode(name),
+                          ),
+                        ),
+                    ],
+                  );
+                },
+              ),
+            ),
         ],
       ),
     );
   }
 }
 
-class _ExpandableHeader extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final IconData icon;
+class _ProxyGroupHeader extends StatelessWidget {
+  final OpenClashProxyGroup group;
+  final Map<String, OpenClashProxyNode> nodes;
+  final int alive;
   final bool expanded;
   final bool busy;
   final VoidCallback onToggle;
   final VoidCallback onTest;
 
-  const _ExpandableHeader({
-    required this.title,
-    required this.subtitle,
-    required this.icon,
+  const _ProxyGroupHeader({
+    required this.group,
+    required this.nodes,
+    required this.alive,
     required this.expanded,
     required this.busy,
     required this.onToggle,
@@ -1061,75 +982,169 @@ class _ExpandableHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final label = CupertinoColors.label.resolveFrom(context);
     final secondary = CupertinoColors.secondaryLabel.resolveFrom(context);
-    final blue = CupertinoColors.activeBlue.resolveFrom(context);
-    return SizedBox(
-      height: 70,
-      child: Row(
-        children: [
-          Expanded(
-            child: CupertinoButton(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              onPressed: onToggle,
-              child: Row(
-                children: [
-                  Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: blue.withValues(alpha: 0.13),
-                      borderRadius: BorderRadius.circular(8),
+    final accent = CupertinoColors.activeBlue.resolveFrom(context);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: CupertinoButton(
+            padding: const EdgeInsets.fromLTRB(14, 13, 8, 13),
+            onPressed: onToggle,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        group.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: label,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                     ),
-                    child: Icon(icon, color: blue, size: 19),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: CupertinoColors.tertiarySystemFill.resolveFrom(
+                          context,
+                        ),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        '$alive/${group.members.length}',
+                        style: TextStyle(
+                          color: secondary,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 9),
+                    Icon(
+                      expanded
+                          ? CupertinoIcons.chevron_up
+                          : CupertinoIcons.chevron_down,
+                      size: 15,
+                      color: secondary,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  width: double.infinity,
+                  constraints: const BoxConstraints(minHeight: 30),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 9,
+                    vertical: 6,
                   ),
-                  const SizedBox(width: 11),
-                  Expanded(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          title,
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        CupertinoIcons.check_mark_circled_solid,
+                        size: 14,
+                        color: accent,
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          group.current,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 15,
+                          style: TextStyle(
+                            color: label,
+                            fontSize: 13,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
-                        const SizedBox(height: 3),
-                        Text(
-                          subtitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 12, color: secondary),
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                  Icon(
-                    expanded
-                        ? CupertinoIcons.chevron_up
-                        : CupertinoIcons.chevron_down,
-                    size: 15,
-                    color: secondary,
-                  ),
-                ],
+                ),
+                const SizedBox(height: 11),
+                _LatencyDistribution(nodeNames: group.members, nodes: nodes),
+              ],
+            ),
+          ),
+        ),
+        Semantics(
+          button: true,
+          label: '测试 ${group.name} 延迟',
+          child: CupertinoButton(
+            padding: const EdgeInsets.fromLTRB(8, 13, 14, 10),
+            onPressed: busy ? null : onTest,
+            child: busy
+                ? const CupertinoActivityIndicator(radius: 8)
+                : const Icon(CupertinoIcons.speedometer, size: 20),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _LatencyDistribution extends StatelessWidget {
+  final List<String> nodeNames;
+  final Map<String, OpenClashProxyNode> nodes;
+
+  const _LatencyDistribution({required this.nodeNames, required this.nodes});
+
+  @override
+  Widget build(BuildContext context) {
+    var fast = 0;
+    var medium = 0;
+    var slow = 0;
+    var unavailable = 0;
+    for (final name in nodeNames) {
+      final node = nodes[name];
+      final delay = node?.delay;
+      if (node?.alive != true || delay == null) {
+        unavailable++;
+      } else if (delay <= 100) {
+        fast++;
+      } else if (delay <= 250) {
+        medium++;
+      } else {
+        slow++;
+      }
+    }
+    final segments = <(int, Color)>[
+      if (fast > 0) (fast, CupertinoColors.systemGreen.resolveFrom(context)),
+      if (medium > 0)
+        (medium, CupertinoColors.systemYellow.resolveFrom(context)),
+      if (slow > 0) (slow, CupertinoColors.systemRed.resolveFrom(context)),
+      if (unavailable > 0)
+        (unavailable, CupertinoColors.systemGrey.resolveFrom(context)),
+    ];
+    if (segments.isEmpty) {
+      segments.add((1, CupertinoColors.systemGrey.resolveFrom(context)));
+    }
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(3),
+      child: SizedBox(
+        height: 5,
+        child: Row(
+          children: [
+            for (final segment in segments)
+              Expanded(
+                flex: segment.$1,
+                child: ColoredBox(color: segment.$2),
               ),
-            ),
-          ),
-          Semantics(
-            button: true,
-            label: '测试延迟',
-            child: CupertinoButton(
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              onPressed: busy ? null : onTest,
-              child: busy
-                  ? const CupertinoActivityIndicator(radius: 8)
-                  : const Icon(CupertinoIcons.speedometer, size: 20),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1154,19 +1169,24 @@ class _ProxyNodeTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final label = CupertinoColors.label.resolveFrom(context);
     final secondary = CupertinoColors.secondaryLabel.resolveFrom(context);
     final separator = CupertinoColors.separator.resolveFrom(context);
     final selectedColor = CupertinoColors.activeBlue.resolveFrom(context);
     return Container(
-      constraints: const BoxConstraints(minHeight: 58),
+      constraints: const BoxConstraints(minHeight: 68),
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: selected
-            ? selectedColor.withValues(alpha: 0.08)
+            ? selectedColor.withValues(alpha: 0.07)
             : CupertinoColors.secondarySystemGroupedBackground.resolveFrom(
                 context,
               ),
-        border: Border(
-          top: BorderSide(color: separator.withValues(alpha: 0.3)),
+        borderRadius: BorderRadius.circular(7),
+        border: Border.all(
+          color: selected
+              ? selectedColor.withValues(alpha: 0.6)
+              : separator.withValues(alpha: 0.32),
         ),
       ),
       child: Row(
@@ -1203,7 +1223,7 @@ class _ProxyNodeTile extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             fontSize: 14,
-                            color: selected ? selectedColor : null,
+                            color: label,
                             fontWeight: selected
                                 ? FontWeight.w600
                                 : FontWeight.w400,
@@ -1256,17 +1276,28 @@ class _LatencyLabel extends StatelessWidget {
         : delay <= 250
         ? CupertinoColors.systemOrange.resolveFrom(context)
         : CupertinoColors.systemRed.resolveFrom(context);
+    final textColor = CupertinoColors.secondaryLabel.resolveFrom(context);
     return SizedBox(
-      width: 56,
-      child: Text(
-        delay == null ? '--' : '$delay ms',
-        maxLines: 1,
-        textAlign: TextAlign.end,
-        style: TextStyle(
-          fontSize: 12,
-          color: color,
-          fontWeight: FontWeight.w600,
-        ),
+      width: 70,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          Container(
+            width: 7,
+            height: 7,
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 5),
+          Text(
+            delay == null ? '--' : '$delay ms',
+            maxLines: 1,
+            style: TextStyle(
+              fontSize: 12,
+              color: textColor,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
       ),
     );
   }

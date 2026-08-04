@@ -18,7 +18,7 @@ function index()
   entry(
     { "admin", "services", "luci-mobile-mihomo", "proxies" },
     call("action_proxies"), nil
-  ).leaf = true
+  )
   entry(
     { "admin", "services", "luci-mobile-mihomo", "proxies", "select" },
     call("action_select_proxy"), nil

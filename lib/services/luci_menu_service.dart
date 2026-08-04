@@ -59,7 +59,42 @@ class LuciMenuService {
       if (item != null) items.add(item);
     }
     items.sort(_compareItems);
-    return LuciNavigationPolicy.filterVisibleRoots(items);
+    return LuciNavigationPolicy.filterVisibleRoots(addAppEntries(items));
+  }
+
+  static List<LuciMenuItem> addAppEntries(List<LuciMenuItem> items) {
+    return items
+        .map((item) {
+          if (item.key != 'services') return item;
+
+          final children = [...item.children];
+          final openClashIndex = children.indexWhere(
+            (child) => child.key == 'openclash',
+          );
+          final alreadyAdded = children.any(
+            (child) => child.key == 'metacubexd',
+          );
+          if (openClashIndex < 0 || alreadyAdded) return item;
+
+          final openClash = children[openClashIndex];
+          children.insert(
+            openClashIndex + 1,
+            LuciMenuItem(
+              key: 'metacubexd',
+              title: 'MetaCubeXD',
+              order: openClash.order + 0.001,
+              pathSegments: const ['admin', 'services', 'luci-mobile-mihomo'],
+            ),
+          );
+          return LuciMenuItem(
+            key: item.key,
+            title: item.title,
+            order: item.order,
+            pathSegments: item.pathSegments,
+            children: children,
+          );
+        })
+        .toList(growable: false);
   }
 
   LuciMenuItem? _parseNode(
