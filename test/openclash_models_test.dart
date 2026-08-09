@@ -85,6 +85,23 @@ void main() {
     expect(node.history, isEmpty);
   });
 
+  test('calculates the MetaCubeXD health score from Mihomo history', () {
+    final delays = [671, 683, 531, 701, 725, 689, 505, 674, 734, 672];
+    final history = [
+      for (var index = 0; index < delays.length; index++)
+        OpenClashDelayHistoryEntry(
+          time: '2026-08-09T08:${index.toString().padLeft(2, '0')}:00Z',
+          delay: delays[index],
+        ),
+    ];
+
+    final health = OpenClashNodeHealth.fromHistory(history);
+
+    expect(health, isNotNull);
+    expect(health!.score, 71);
+    expect(health.lastTestTime, DateTime.utc(2026, 8, 9, 8, 9));
+  });
+
   test('treats Lua empty-table snapshot collections as empty lists', () {
     final snapshot = OpenClashProxySnapshot.fromJson({
       'groups': <String, dynamic>{},

@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:luci_mobile/main.dart';
 import 'package:luci_mobile/models/openclash.dart';
 import 'package:luci_mobile/services/luci_auth_protocol.dart';
+import 'package:luci_mobile/services/openclash_group_probe.dart';
 import 'package:luci_mobile/services/openclash_network_service.dart';
 import 'package:luci_mobile/widgets/native_navigation_bar.dart';
 
@@ -34,6 +35,7 @@ class _MetaCubeXdScreenState extends ConsumerState<MetaCubeXdScreen> {
   final Set<String> _expandedGroups = {};
   final Set<String> _pendingActions = {};
   late final OpenClashNetworkService _networkService;
+  late final bool _ownsNetworkService;
 
   Timer? _pollTimer;
   _MetaCubePage _page = _MetaCubePage.overview;
@@ -48,7 +50,10 @@ class _MetaCubeXdScreenState extends ConsumerState<MetaCubeXdScreen> {
   bool _loadingProxies = false;
   bool _loadingIpInfo = false;
   bool _testingLatencies = false;
+  bool _testingAllGroups = false;
   bool _switchingMode = false;
+  int _testedGroupCount = 0;
+  int _totalGroupCount = 0;
   double _uploadRate = 0;
   double _downloadRate = 0;
   final List<double> _uploadHistory = [];
@@ -57,6 +62,7 @@ class _MetaCubeXdScreenState extends ConsumerState<MetaCubeXdScreen> {
   @override
   void initState() {
     super.initState();
+    _ownsNetworkService = widget.networkService == null;
     _networkService = widget.networkService ?? OpenClashNetworkService();
     _searchController.addListener(_searchChanged);
     if (!widget.loadOnInit) return;
@@ -73,6 +79,7 @@ class _MetaCubeXdScreenState extends ConsumerState<MetaCubeXdScreen> {
   @override
   void dispose() {
     _pollTimer?.cancel();
+    if (_ownsNetworkService) _networkService.dispose();
     _searchController
       ..removeListener(_searchChanged)
       ..dispose();
@@ -202,7 +209,7 @@ class _MetaCubeXdScreenState extends ConsumerState<MetaCubeXdScreen> {
   }
 
   Future<void> _switchMode(OpenClashMode mode) async {
-    if (_switchingMode || mode == _overview?.mode) return;
+    if (_testingAllGroups || _switchingMode || mode == _overview?.mode) return;
     setState(() => _switchingMode = true);
     try {
       final selected = await ref
@@ -233,7 +240,7 @@ class _MetaCubeXdScreenState extends ConsumerState<MetaCubeXdScreen> {
 
   Future<void> _selectProxy(String group, String proxy) async {
     final key = 'select:$group';
-    if (_pendingActions.contains(key)) return;
+    if (_testingAllGroups || _pendingActions.contains(key)) return;
     setState(() => _pendingActions.add(key));
     try {
       await ref
@@ -253,7 +260,7 @@ class _MetaCubeXdScreenState extends ConsumerState<MetaCubeXdScreen> {
     String? provider,
   }) async {
     final key = 'delay:$kind:${provider ?? ''}:$name';
-    if (_pendingActions.contains(key)) return;
+    if (_testingAllGroups || _pendingActions.contains(key)) return;
     setState(() => _pendingActions.add(key));
     try {
       await ref
@@ -269,6 +276,86 @@ class _MetaCubeXdScreenState extends ConsumerState<MetaCubeXdScreen> {
       if (mounted) await _showActionError(error);
     } finally {
       if (mounted) setState(() => _pendingActions.remove(key));
+    }
+  }
+
+  Future<Map<String, dynamic>> _testGroupForBatch(String group) async {
+    final key = 'delay:group::$group';
+    if (_pendingActions.contains(key)) return const {};
+    if (mounted) setState(() => _pendingActions.add(key));
+    try {
+      final result = await ref
+          .read(appStateProvider)
+          .testOpenClashDelay(
+            kind: 'group',
+            name: group,
+            context: context,
+          );
+      await _loadProxies();
+      return result;
+    } finally {
+      if (mounted) {
+        setState(() {
+          _pendingActions.remove(key);
+          _testedGroupCount++;
+        });
+      }
+    }
+  }
+
+  Future<void> _testAllGroups() async {
+    final snapshot = _proxySnapshot;
+    if (_testingAllGroups ||
+        _pendingActions.isNotEmpty ||
+        snapshot == null ||
+        snapshot.groups.isEmpty) {
+      return;
+    }
+    final groups = snapshot.groups.map((group) => group.name).toList();
+    Object? firstFailure;
+    var failureCount = 0;
+    setState(() {
+      _testingAllGroups = true;
+      _testedGroupCount = 0;
+      _totalGroupCount = groups.length;
+    });
+    try {
+      await testOpenClashGroupsSequentially(groups, (group) async {
+        try {
+          return await _testGroupForBatch(group);
+        } on LuciSessionExpiredException {
+          rethrow;
+        } catch (error) {
+          firstFailure ??= error;
+          failureCount++;
+          return const {};
+        }
+      });
+      if (mounted && firstFailure != null) {
+        await showCupertinoDialog<void>(
+          context: context,
+          builder: (dialogContext) => CupertinoAlertDialog(
+            title: const Text('测速完成'),
+            content: Text('$failureCount 个策略测速失败。\n$firstFailure'),
+            actions: [
+              CupertinoDialogAction(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('好'),
+              ),
+            ],
+          ),
+        );
+      }
+    } catch (error) {
+      if (mounted) await _showActionError(error);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _testingAllGroups = false;
+          _testedGroupCount = 0;
+          _totalGroupCount = 0;
+        });
+      }
     }
   }
 
@@ -322,7 +409,8 @@ class _MetaCubeXdScreenState extends ConsumerState<MetaCubeXdScreen> {
                 _loadingOverview ||
                     _loadingProxies ||
                     _loadingIpInfo ||
-                    _testingLatencies
+                    _testingLatencies ||
+                    _testingAllGroups
                 ? null
                 : () => unawaited(_refreshCurrentPage()),
             child: const Icon(CupertinoIcons.refresh, size: 21),
@@ -620,6 +708,38 @@ class _MetaCubeXdScreenState extends ConsumerState<MetaCubeXdScreen> {
                       ),
                     ),
                   ),
+                  const SizedBox(width: 8),
+                  Semantics(
+                    button: true,
+                    label: '测试所有代理组',
+                    child: CupertinoButton(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 5,
+                      ),
+                      minimumSize: const Size(0, 30),
+                      onPressed:
+                          _testingAllGroups || _pendingActions.isNotEmpty
+                          ? null
+                          : () => unawaited(_testAllGroups()),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (_testingAllGroups)
+                            const CupertinoActivityIndicator(radius: 7)
+                          else
+                            const Icon(CupertinoIcons.speedometer, size: 17),
+                          const SizedBox(width: 5),
+                          Text(
+                            _testingAllGroups
+                                ? '$_testedGroupCount/$_totalGroupCount'
+                                : '全部测速',
+                            style: const TextStyle(fontSize: 13),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 10),
@@ -683,11 +803,11 @@ class _MetaCubeXdScreenState extends ConsumerState<MetaCubeXdScreen> {
                     child: Text(value.label),
                   ),
               },
-              onValueChanged: (value) {
-                if (!_switchingMode && value != null) {
-                  unawaited(_switchMode(value));
-                }
-              },
+              onValueChanged: _testingAllGroups || _switchingMode
+                  ? null
+                  : (value) {
+                      if (value != null) unawaited(_switchMode(value));
+                    },
             ),
           ),
         ],
@@ -728,12 +848,12 @@ class _MetaCubeXdScreenState extends ConsumerState<MetaCubeXdScreen> {
               group: group,
               nodes: snapshot.nodes,
               expanded: _expandedGroups.contains(group.name),
-              pendingSelection: _pendingActions.contains(
-                'select:${group.name}',
-              ),
-              pendingDelay: _pendingActions.contains(
-                'delay:group::${group.name}',
-              ),
+              pendingSelection:
+                  _testingAllGroups ||
+                  _pendingActions.contains('select:${group.name}'),
+              pendingDelay:
+                  _testingAllGroups ||
+                  _pendingActions.contains('delay:group::${group.name}'),
               query: group.name.toLowerCase().contains(query) ? '' : query,
               onToggle: () => setState(() {
                 if (!_expandedGroups.add(group.name)) {
@@ -873,9 +993,13 @@ class _IpInfoCard extends StatelessWidget {
       return const Center(child: CupertinoActivityIndicator());
     }
     if (current == null) {
+      final message = error == null ? '暂无数据' : error.toString();
       return Center(
         child: Text(
-          error == null ? '暂无数据' : '无法获取当前出口 IP',
+          message,
+          maxLines: 4,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
           style: TextStyle(
             color: CupertinoColors.secondaryLabel.resolveFrom(context),
             fontSize: 13,
@@ -1147,6 +1271,30 @@ Color _latencyColor(BuildContext context, int? delay) {
   return CupertinoColors.systemRed.resolveFrom(context);
 }
 
+Color _proxyLatencyColor(BuildContext context, int? delay) {
+  if (delay == null || delay == 0) {
+    return CupertinoColors.systemGrey.resolveFrom(context);
+  }
+  if (delay <= 800) return CupertinoColors.systemGreen.resolveFrom(context);
+  if (delay <= 1500) return CupertinoColors.systemYellow.resolveFrom(context);
+  return CupertinoColors.systemRed.resolveFrom(context);
+}
+
+Color _healthScoreColor(BuildContext context, int score) {
+  if (score >= 80) return CupertinoColors.systemGreen.resolveFrom(context);
+  if (score >= 50) return CupertinoColors.systemYellow.resolveFrom(context);
+  return CupertinoColors.systemRed.resolveFrom(context);
+}
+
+String _formatTimeSince(DateTime timestamp) {
+  final difference = DateTime.now().toUtc().difference(timestamp.toUtc());
+  final seconds = math.max(0, difference.inSeconds).toInt();
+  if (seconds < 60) return '${seconds}s ago';
+  if (seconds < 3600) return '${seconds ~/ 60}m ago';
+  if (seconds < 86400) return '${seconds ~/ 3600}h ago';
+  return '${seconds ~/ 86400}d ago';
+}
+
 class _TrafficChart extends StatelessWidget {
   final List<double> upload;
   final List<double> download;
@@ -1370,7 +1518,9 @@ class _ProxyGroupCard extends StatelessWidget {
                             name: name,
                             node: nodes[name],
                             selected: name == group.current,
-                            busy: pendingActions.contains('delay:node::$name'),
+                            busy:
+                                pendingDelay ||
+                                pendingActions.contains('delay:node::$name'),
                             onTap: pendingSelection || name == group.current
                                 ? null
                                 : () => onSelect(name),
@@ -1540,9 +1690,9 @@ class _LatencyDistribution extends StatelessWidget {
       final delay = node?.delay;
       if (node?.alive != true || delay == null) {
         unavailable++;
-      } else if (delay <= 100) {
+      } else if (delay <= 800) {
         fast++;
-      } else if (delay <= 250) {
+      } else if (delay <= 1500) {
         medium++;
       } else {
         slow++;
@@ -1600,8 +1750,13 @@ class _ProxyNodeTile extends StatelessWidget {
     final secondary = CupertinoColors.secondaryLabel.resolveFrom(context);
     final separator = CupertinoColors.separator.resolveFrom(context);
     final selectedColor = CupertinoColors.activeBlue.resolveFrom(context);
+    final health = OpenClashNodeHealth.fromHistory(
+      node?.history ?? const <OpenClashDelayHistoryEntry>[],
+    );
+    final hasMetadata = node != null &&
+        (node!.type.isNotEmpty || node!.udp || node!.xudp || node!.tfo);
     return Container(
-      constraints: const BoxConstraints(minHeight: 68),
+      constraints: const BoxConstraints(minHeight: 76),
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         color: selected
@@ -1656,11 +1811,7 @@ class _ProxyNodeTile extends StatelessWidget {
                                 : FontWeight.w400,
                           ),
                         ),
-                        if (node != null &&
-                            (node!.type.isNotEmpty ||
-                                node!.udp ||
-                                node!.xudp ||
-                                node!.tfo)) ...[
+                        if (hasMetadata) ...[
                           const SizedBox(height: 2),
                           Row(
                             children: [
@@ -1708,6 +1859,34 @@ class _ProxyNodeTile extends StatelessWidget {
                             ],
                           ),
                         ],
+                        if (health != null) ...[
+                          const SizedBox(height: 2),
+                          Row(
+                            children: [
+                              Text(
+                                '${health.score}',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: _healthScoreColor(
+                                    context,
+                                    health.score,
+                                  ),
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              if (health.lastTestTime != null) ...[
+                                const SizedBox(width: 5),
+                                Text(
+                                  _formatTimeSince(health.lastTestTime!),
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: secondary,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -1743,7 +1922,7 @@ class _LatencyLabel extends StatelessWidget {
     final delay = node?.delay;
     final color = node?.alive == false
         ? CupertinoColors.systemRed.resolveFrom(context)
-        : _latencyColor(context, delay);
+        : _proxyLatencyColor(context, delay);
     final textColor = CupertinoColors.secondaryLabel.resolveFrom(context);
     return SizedBox(
       width: 72,
@@ -1783,9 +1962,7 @@ class _LatencyLabel extends StatelessWidget {
                     for (final entry in node!.history)
                       Expanded(
                         child: ColoredBox(
-                          color: entry.delay == 0
-                              ? CupertinoColors.systemGrey.resolveFrom(context)
-                              : _latencyColor(context, entry.delay),
+                          color: _proxyLatencyColor(context, entry.delay),
                         ),
                       ),
                   ],

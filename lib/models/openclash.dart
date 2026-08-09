@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 enum OpenClashMode {
   rule('rule', '规则'),
   global('global', '全局'),
@@ -152,6 +154,70 @@ class OpenClashDelayHistoryEntry {
       time: json['time']?.toString() ?? '',
       delay: _nonNegativeInt(json['delay']),
     );
+  }
+}
+
+class OpenClashNodeHealth {
+  final int score;
+  final DateTime? lastTestTime;
+
+  const OpenClashNodeHealth({required this.score, this.lastTestTime});
+
+  static OpenClashNodeHealth? fromHistory(
+    List<OpenClashDelayHistoryEntry> history,
+  ) {
+    if (history.isEmpty) return null;
+    final latencies = history
+        .map((entry) => entry.delay)
+        .where((delay) => delay > 0)
+        .toList(growable: false);
+    final latencyScore = _latencyScore(latencies);
+    final stabilityScore = _stabilityScore(latencies);
+    final successRateScore = (latencies.length / history.length * 100).round();
+    final timestamps = history
+        .map((entry) => DateTime.tryParse(entry.time)?.toUtc())
+        .whereType<DateTime>();
+    DateTime? lastTestTime;
+    for (final timestamp in timestamps) {
+      if (lastTestTime == null || timestamp.isAfter(lastTestTime)) {
+        lastTestTime = timestamp;
+      }
+    }
+    return OpenClashNodeHealth(
+      score: (latencyScore * 0.5 +
+              stabilityScore * 0.3 +
+              successRateScore * 0.2)
+          .round(),
+      lastTestTime: lastTestTime,
+    );
+  }
+
+  static int _latencyScore(List<int> latencies) {
+    if (latencies.isEmpty) return 0;
+    final average =
+        latencies.reduce((left, right) => left + right) / latencies.length;
+    if (average <= 50) return 100;
+    if (average >= 5000) return 0;
+    return (100 *
+            (1 -
+                (math.log(average) - math.log(50)) /
+                    (math.log(5000) - math.log(50))))
+        .round();
+  }
+
+  static int _stabilityScore(List<int> latencies) {
+    if (latencies.isEmpty) return 0;
+    if (latencies.length == 1) return 50;
+    final average =
+        latencies.reduce((left, right) => left + right) / latencies.length;
+    final variance = latencies
+            .map((latency) => math.pow(latency - average, 2))
+            .reduce((left, right) => left + right) /
+        latencies.length;
+    final coefficientOfVariation = math.sqrt(variance) / average;
+    if (coefficientOfVariation <= 0.1) return 100;
+    if (coefficientOfVariation >= 0.5) return 0;
+    return (100 * (1 - (coefficientOfVariation - 0.1) / 0.4)).round();
   }
 }
 

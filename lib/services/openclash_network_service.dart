@@ -1,11 +1,35 @@
+import 'dart:async';
 import 'dart:convert';
 
+import 'package:cupertino_http/cupertino_http.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 import 'package:luci_mobile/models/openclash.dart';
 
 typedef OpenClashLatencyProbe = Future<int?> Function(Uri target);
 
+enum OpenClashIpInfoErrorKind { timeout, httpStatus, invalidResponse, network }
+
+class OpenClashIpInfoException implements Exception {
+  final OpenClashIpInfoErrorKind kind;
+  final String message;
+
+  const OpenClashIpInfoException(this.kind, this.message);
+
+  @override
+  String toString() => message;
+}
+
+http.Client _createIpInfoClient() {
+  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
+    return CupertinoClient.defaultSessionConfiguration();
+  }
+  return http.Client();
+}
+
 class OpenClashNetworkService {
+  static const defaultIpInfoTimeout = Duration(seconds: 10);
   static final Uri _ipSbEndpoint = Uri.parse('https://api.ip.sb/geoip');
   static final List<(String, Uri)> _latencyTargets = [
     ('Google', Uri.parse('https://www.google.com/generate_204')),
@@ -14,9 +38,17 @@ class OpenClashNetworkService {
   ];
 
   final Dio _dio;
+  final http.Client _ipInfoClient;
+  final Duration _ipInfoTimeout;
+  final bool _ownsIpInfoClient;
   final OpenClashLatencyProbe? _latencyProbe;
 
-  OpenClashNetworkService({Dio? dio, OpenClashLatencyProbe? latencyProbe})
+  OpenClashNetworkService({
+    Dio? dio,
+    http.Client? ipInfoClient,
+    Duration ipInfoTimeout = defaultIpInfoTimeout,
+    OpenClashLatencyProbe? latencyProbe,
+  })
     : _dio =
           dio ??
           Dio(
@@ -26,24 +58,67 @@ class OpenClashNetworkService {
               sendTimeout: const Duration(seconds: 5),
             ),
           ),
+      _ipInfoClient = ipInfoClient ?? _createIpInfoClient(),
+      _ipInfoTimeout = ipInfoTimeout,
+      _ownsIpInfoClient = ipInfoClient == null,
       _latencyProbe = latencyProbe;
 
   Future<OpenClashIpInfo> fetchIpInfo() async {
-    final response = await _dio.getUri<dynamic>(
-      _ipSbEndpoint,
-      options: Options(
-        responseType: ResponseType.json,
+    try {
+      final response = await _ipInfoClient.get(
+        _ipSbEndpoint,
         headers: const {'Accept': 'application/json'},
-      ),
-    );
-    dynamic data = response.data;
-    if (data is String) data = jsonDecode(data);
-    if (data is! Map) throw const FormatException('IP.SB 返回了无效数据。');
-    final info = OpenClashIpInfo.fromIpSbJson(
-      data.map((key, value) => MapEntry(key.toString(), value)),
-    );
-    if (info.ip.isEmpty) throw const FormatException('IP.SB 未返回 IP 地址。');
-    return info;
+      ).timeout(_ipInfoTimeout);
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw OpenClashIpInfoException(
+          OpenClashIpInfoErrorKind.httpStatus,
+          'IP.SB 请求失败（HTTP ${response.statusCode}）。',
+        );
+      }
+      final data = jsonDecode(utf8.decode(response.bodyBytes));
+      if (data is! Map) {
+        throw const OpenClashIpInfoException(
+          OpenClashIpInfoErrorKind.invalidResponse,
+          'IP.SB 返回了无效数据。',
+        );
+      }
+      final info = OpenClashIpInfo.fromIpSbJson(
+        data.map((key, value) => MapEntry(key.toString(), value)),
+      );
+      if (info.ip.isEmpty) {
+        throw const OpenClashIpInfoException(
+          OpenClashIpInfoErrorKind.invalidResponse,
+          'IP.SB 未返回 IP 地址。',
+        );
+      }
+      return info;
+    } on TimeoutException {
+      throw OpenClashIpInfoException(
+        OpenClashIpInfoErrorKind.timeout,
+        'IP.SB 请求超时（${_ipInfoTimeout.inSeconds} 秒）。',
+      );
+    } on OpenClashIpInfoException {
+      rethrow;
+    } on FormatException {
+      throw const OpenClashIpInfoException(
+        OpenClashIpInfoErrorKind.invalidResponse,
+        'IP.SB 返回了无法解析的数据。',
+      );
+    } on http.ClientException catch (error) {
+      throw OpenClashIpInfoException(
+        OpenClashIpInfoErrorKind.network,
+        'IP.SB 网络连接失败：${error.message}',
+      );
+    } catch (error) {
+      throw OpenClashIpInfoException(
+        OpenClashIpInfoErrorKind.network,
+        'IP.SB 请求失败：$error',
+      );
+    }
+  }
+
+  void dispose() {
+    if (_ownsIpInfoClient) _ipInfoClient.close();
   }
 
   Future<List<OpenClashLatencyResult>> testLatencies() {
