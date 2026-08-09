@@ -767,6 +767,7 @@ class _MetaCubeXdScreenState extends ConsumerState<MetaCubeXdScreen> {
 
   Widget _buildModeControl() {
     final mode = _overview?.mode ?? OpenClashMode.rule;
+    final interactionEnabled = !_testingAllGroups && !_switchingMode;
     final surface = CupertinoColors.secondarySystemGroupedBackground
         .resolveFrom(context);
     final border = CupertinoColors.separator.resolveFrom(context);
@@ -792,22 +793,26 @@ class _MetaCubeXdScreenState extends ConsumerState<MetaCubeXdScreen> {
             ],
           ),
           const SizedBox(height: 10),
-          SizedBox(
-            width: double.infinity,
-            child: CupertinoSlidingSegmentedControl<OpenClashMode>(
-              groupValue: mode,
-              children: {
-                for (final value in OpenClashMode.values)
-                  value: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                    child: Text(value.label),
-                  ),
-              },
-              onValueChanged: _testingAllGroups || _switchingMode
-                  ? null
-                  : (value) {
-                      if (value != null) unawaited(_switchMode(value));
-                    },
+          IgnorePointer(
+            ignoring: !interactionEnabled,
+            child: Opacity(
+              opacity: interactionEnabled ? 1 : 0.45,
+              child: SizedBox(
+                width: double.infinity,
+                child: CupertinoSlidingSegmentedControl<OpenClashMode>(
+                  groupValue: mode,
+                  children: {
+                    for (final value in OpenClashMode.values)
+                      value: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        child: Text(value.label),
+                      ),
+                  },
+                  onValueChanged: (value) {
+                    if (value != null) unawaited(_switchMode(value));
+                  },
+                ),
+              ),
             ),
           ),
         ],
