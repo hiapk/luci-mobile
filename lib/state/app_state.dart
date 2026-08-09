@@ -246,6 +246,7 @@ class AppState extends ChangeNotifier {
   String? get authCookieName => _authService?.cookieName;
   bool get isAuthenticated => _authService?.isAuthenticated ?? false;
   bool get requiresOtp => _authService?.requiresOtp ?? false;
+  bool get supportsFaceIdTotp => _secureStorageService.supportsFaceIdTotp;
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
 
@@ -1575,6 +1576,10 @@ class AppState extends ChangeNotifier {
       ipAddress: router.ipAddress,
       useHttps: router.useHttps,
     );
+    await _secureStorageService.deleteTotpSecret(
+      ipAddress: router.ipAddress,
+      username: router.username,
+    );
 
     final needsSwitch = await _routerService!.removeRouter(id);
     if (needsSwitch && _routerService!.routers.isNotEmpty) {
@@ -1636,6 +1641,7 @@ class AppState extends ChangeNotifier {
     String pass,
     bool useHttps, {
     String? otp,
+    String? totpSecret,
     bool fromRouter = false,
     BuildContext? context,
   }) async {
@@ -1654,6 +1660,7 @@ class AppState extends ChangeNotifier {
         pass,
         useHttps,
         otp: otp,
+        totpSecret: totpSecret,
         context: context,
       );
 

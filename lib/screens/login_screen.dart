@@ -7,6 +7,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 import 'package:luci_mobile/config/app_config.dart';
 import 'package:luci_mobile/services/secure_storage_service.dart';
+import 'package:luci_mobile/services/totp_service.dart';
 import 'package:luci_mobile/utils/url_parser.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -23,9 +24,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   final _usernameController = TextEditingController(text: 'root');
   final _passwordController = TextEditingController();
   final _otpController = TextEditingController();
+  final _totpSecretController = TextEditingController();
   final _confirmationController = TextEditingController();
   bool _isCheckingAutoLogin = true;
   bool _passwordVisible = false;
+  bool _totpSecretVisible = false;
+  bool _enrollFaceIdTotp = false;
   late AnimationController _logoAnimController;
   late AnimationController _progressAnimController;
   bool _isActivatingReviewerMode = false;
@@ -148,6 +152,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     _usernameController.dispose();
     _passwordController.dispose();
     _otpController.dispose();
+    _totpSecretController.dispose();
     _confirmationController.dispose();
     _logoAnimController.dispose();
     _progressAnimController.dispose();
@@ -185,7 +190,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
       final input = _ipController.text.trim();
       final user = _usernameController.text;
       final pass = _passwordController.text;
-      final otp = _otpController.text;
+      final otp = _enrollFaceIdTotp ? null : _otpController.text;
+      final totpSecret = _enrollFaceIdTotp ? _totpSecretController.text : null;
 
       // Parse the input to extract host, port, and protocol
       final parsedUrl = UrlParser.parse(input);
@@ -203,6 +209,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
         pass,
         parsedUrl.useHttps,
         otp: otp,
+        totpSecret: totpSecret,
         fromRouter: false,
         context: context,
       );
@@ -526,36 +533,134 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                                             ),
                                           ),
                                           const SizedBox(height: 10),
-                                          TextFormField(
-                                            controller: _otpController,
-                                            keyboardType: TextInputType.number,
-                                            maxLength: 6,
-                                            autofillHints: const [
-                                              AutofillHints.oneTimeCode,
-                                            ],
-                                            decoration: const InputDecoration(
-                                              labelText: '两步验证码（可选）',
-                                              helperText:
-                                                  '启用 2FA 时输入验证器中的 6 位动态码',
-                                              border: OutlineInputBorder(),
-                                              prefixIcon: Icon(
-                                                Icons.pin_outlined,
+                                          if (appState.supportsFaceIdTotp)
+                                            SwitchListTile.adaptive(
+                                              contentPadding: EdgeInsets.zero,
+                                              secondary: const Icon(
+                                                Icons.face_outlined,
                                               ),
-                                              counterText: '',
+                                              title: const Text(
+                                                '使用 Face ID 自动验证',
+                                              ),
+                                              subtitle: const Text(
+                                                '密钥仅保存在当前设备',
+                                              ),
+                                              value: _enrollFaceIdTotp,
+                                              onChanged: (value) {
+                                                setState(() {
+                                                  _enrollFaceIdTotp = value;
+                                                  if (value) {
+                                                    _otpController.clear();
+                                                  } else {
+                                                    _totpSecretController
+                                                        .clear();
+                                                  }
+                                                });
+                                              },
                                             ),
-                                            textInputAction:
-                                                TextInputAction.done,
-                                            onFieldSubmitted: (_) => _connect(),
-                                            validator: (value) {
-                                              final otp = value?.trim() ?? '';
-                                              if (otp.isNotEmpty &&
-                                                  !RegExp(
-                                                    r'^\d{6}$',
-                                                  ).hasMatch(otp)) {
-                                                return '请输入 6 位数字验证码';
-                                              }
-                                              return null;
-                                            },
+                                          AnimatedSwitcher(
+                                            duration: const Duration(
+                                              milliseconds: 180,
+                                            ),
+                                            child: _enrollFaceIdTotp
+                                                ? TextFormField(
+                                                    key: const ValueKey(
+                                                      'totp-secret',
+                                                    ),
+                                                    controller:
+                                                        _totpSecretController,
+                                                    obscureText:
+                                                        !_totpSecretVisible,
+                                                    autocorrect: false,
+                                                    enableSuggestions: false,
+                                                    decoration: InputDecoration(
+                                                      labelText:
+                                                          'TOTP 密钥或 otpauth://',
+                                                      border:
+                                                          const OutlineInputBorder(),
+                                                      prefixIcon: const Icon(
+                                                        Icons.key_outlined,
+                                                      ),
+                                                      suffixIcon: IconButton(
+                                                        onPressed: () => setState(
+                                                          () => _totpSecretVisible =
+                                                              !_totpSecretVisible,
+                                                        ),
+                                                        icon: Icon(
+                                                          _totpSecretVisible
+                                                              ? Icons
+                                                                    .visibility_outlined
+                                                              : Icons
+                                                                    .visibility_off_outlined,
+                                                        ),
+                                                        tooltip:
+                                                            _totpSecretVisible
+                                                            ? '隐藏密钥'
+                                                            : '显示密钥',
+                                                      ),
+                                                    ),
+                                                    textInputAction:
+                                                        TextInputAction.done,
+                                                    onFieldSubmitted: (_) =>
+                                                        _connect(),
+                                                    validator: (value) {
+                                                      if (!_enrollFaceIdTotp) {
+                                                        return null;
+                                                      }
+                                                      try {
+                                                        TotpService()
+                                                            .normalizeSecret(
+                                                              value ?? '',
+                                                            );
+                                                        return null;
+                                                      } on FormatException catch (
+                                                        error
+                                                      ) {
+                                                        return error.message
+                                                            .toString();
+                                                      }
+                                                    },
+                                                  )
+                                                : TextFormField(
+                                                    key: const ValueKey(
+                                                      'manual-otp',
+                                                    ),
+                                                    controller: _otpController,
+                                                    keyboardType:
+                                                        TextInputType.number,
+                                                    maxLength: 6,
+                                                    autofillHints: const [
+                                                      AutofillHints.oneTimeCode,
+                                                    ],
+                                                    decoration:
+                                                        const InputDecoration(
+                                                          labelText:
+                                                              '两步验证码（可选）',
+                                                          helperText:
+                                                              '输入验证器中的 6 位动态码',
+                                                          border:
+                                                              OutlineInputBorder(),
+                                                          prefixIcon: Icon(
+                                                            Icons.pin_outlined,
+                                                          ),
+                                                          counterText: '',
+                                                        ),
+                                                    textInputAction:
+                                                        TextInputAction.done,
+                                                    onFieldSubmitted: (_) =>
+                                                        _connect(),
+                                                    validator: (value) {
+                                                      final otp =
+                                                          value?.trim() ?? '';
+                                                      if (otp.isNotEmpty &&
+                                                          !RegExp(
+                                                            r'^\d{6}$',
+                                                          ).hasMatch(otp)) {
+                                                        return '请输入 6 位数字验证码';
+                                                      }
+                                                      return null;
+                                                    },
+                                                  ),
                                           ),
                                           AnimatedSwitcher(
                                             duration: const Duration(

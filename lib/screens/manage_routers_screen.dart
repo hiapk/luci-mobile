@@ -4,6 +4,7 @@ import 'package:luci_mobile/main.dart';
 import 'package:luci_mobile/models/router.dart' as model;
 import 'package:luci_mobile/widgets/luci_app_bar.dart';
 import 'package:luci_mobile/utils/url_parser.dart';
+import 'package:luci_mobile/services/totp_service.dart';
 
 class ManageRoutersScreen extends ConsumerStatefulWidget {
   const ManageRoutersScreen({super.key});
@@ -292,8 +293,12 @@ class _ManageRoutersScreenState extends ConsumerState<ManageRoutersScreen> {
                                 );
                                 final passController = TextEditingController();
                                 final otpController = TextEditingController();
+                                final totpSecretController =
+                                    TextEditingController();
                                 final formKey = GlobalKey<FormState>();
                                 bool obscureText = true;
+                                bool totpSecretVisible = false;
+                                bool enrollFaceIdTotp = false;
                                 bool isConnecting = false;
                                 String? errorMessage;
                                 await showDialog<Map<String, dynamic>>(
@@ -442,42 +447,128 @@ class _ManageRoutersScreenState extends ConsumerState<ManageRoutersScreen> {
                                                       const SizedBox(
                                                         height: 20,
                                                       ),
-                                                      TextFormField(
-                                                        controller:
-                                                            otpController,
-                                                        keyboardType:
-                                                            TextInputType
-                                                                .number,
-                                                        maxLength: 6,
-                                                        autofillHints: const [
-                                                          AutofillHints
-                                                              .oneTimeCode,
-                                                        ],
-                                                        decoration: const InputDecoration(
-                                                          labelText:
-                                                              '两步验证码（可选）',
-                                                          helperText:
-                                                              '启用 2FA 时输入 6 位动态码',
-                                                          border:
-                                                              OutlineInputBorder(),
-                                                          prefixIcon: Icon(
-                                                            Icons.pin_outlined,
+                                                      if (appState
+                                                          .supportsFaceIdTotp)
+                                                        SwitchListTile.adaptive(
+                                                          contentPadding:
+                                                              EdgeInsets.zero,
+                                                          secondary: const Icon(
+                                                            Icons.face_outlined,
                                                           ),
-                                                          counterText: '',
+                                                          title: const Text(
+                                                            '使用 Face ID 自动验证',
+                                                          ),
+                                                          subtitle: const Text(
+                                                            '密钥仅保存在当前设备',
+                                                          ),
+                                                          value:
+                                                              enrollFaceIdTotp,
+                                                          onChanged: (value) {
+                                                            setState(() {
+                                                              enrollFaceIdTotp =
+                                                                  value;
+                                                              if (value) {
+                                                                otpController
+                                                                    .clear();
+                                                              } else {
+                                                                totpSecretController
+                                                                    .clear();
+                                                              }
+                                                            });
+                                                          },
                                                         ),
-                                                        validator: (value) {
-                                                          final otp =
-                                                              value?.trim() ??
-                                                              '';
-                                                          if (otp.isNotEmpty &&
-                                                              !RegExp(
-                                                                r'^\d{6}$',
-                                                              ).hasMatch(otp)) {
-                                                            return '请输入 6 位数字验证码';
-                                                          }
-                                                          return null;
-                                                        },
-                                                      ),
+                                                      if (enrollFaceIdTotp)
+                                                        TextFormField(
+                                                          controller:
+                                                              totpSecretController,
+                                                          obscureText:
+                                                              !totpSecretVisible,
+                                                          autocorrect: false,
+                                                          enableSuggestions:
+                                                              false,
+                                                          decoration: InputDecoration(
+                                                            labelText:
+                                                                'TOTP 密钥或 otpauth://',
+                                                            border:
+                                                                const OutlineInputBorder(),
+                                                            prefixIcon: const Icon(
+                                                              Icons
+                                                                  .key_outlined,
+                                                            ),
+                                                            suffixIcon: IconButton(
+                                                              onPressed: () => setState(
+                                                                () => totpSecretVisible =
+                                                                    !totpSecretVisible,
+                                                              ),
+                                                              icon: Icon(
+                                                                totpSecretVisible
+                                                                    ? Icons
+                                                                          .visibility_outlined
+                                                                    : Icons
+                                                                          .visibility_off_outlined,
+                                                              ),
+                                                              tooltip:
+                                                                  totpSecretVisible
+                                                                  ? '隐藏密钥'
+                                                                  : '显示密钥',
+                                                            ),
+                                                          ),
+                                                          validator: (value) {
+                                                            try {
+                                                              TotpService()
+                                                                  .normalizeSecret(
+                                                                    value ?? '',
+                                                                  );
+                                                              return null;
+                                                            } on FormatException catch (
+                                                              error
+                                                            ) {
+                                                              return error
+                                                                  .message
+                                                                  .toString();
+                                                            }
+                                                          },
+                                                        )
+                                                      else
+                                                        TextFormField(
+                                                          controller:
+                                                              otpController,
+                                                          keyboardType:
+                                                              TextInputType
+                                                                  .number,
+                                                          maxLength: 6,
+                                                          autofillHints: const [
+                                                            AutofillHints
+                                                                .oneTimeCode,
+                                                          ],
+                                                          decoration: const InputDecoration(
+                                                            labelText:
+                                                                '两步验证码（可选）',
+                                                            helperText:
+                                                                '输入验证器中的 6 位动态码',
+                                                            border:
+                                                                OutlineInputBorder(),
+                                                            prefixIcon: Icon(
+                                                              Icons
+                                                                  .pin_outlined,
+                                                            ),
+                                                            counterText: '',
+                                                          ),
+                                                          validator: (value) {
+                                                            final otp =
+                                                                value?.trim() ??
+                                                                '';
+                                                            if (otp.isNotEmpty &&
+                                                                !RegExp(
+                                                                  r'^\d{6}$',
+                                                                ).hasMatch(
+                                                                  otp,
+                                                                )) {
+                                                              return '请输入 6 位数字验证码';
+                                                            }
+                                                            return null;
+                                                          },
+                                                        ),
                                                       if (errorMessage !=
                                                           null) ...[
                                                         const SizedBox(
@@ -557,8 +648,15 @@ class _ManageRoutersScreenState extends ConsumerState<ManageRoutersScreen> {
                                                                         passController
                                                                             .text;
                                                                     final otp =
-                                                                        otpController
-                                                                            .text;
+                                                                        enrollFaceIdTotp
+                                                                        ? null
+                                                                        : otpController
+                                                                              .text;
+                                                                    final totpSecret =
+                                                                        enrollFaceIdTotp
+                                                                        ? totpSecretController
+                                                                              .text
+                                                                        : null;
 
                                                                     // Parse the input to extract host, port, and protocol
                                                                     final parsedUrl =
@@ -615,6 +713,8 @@ class _ManageRoutersScreenState extends ConsumerState<ManageRoutersScreen> {
                                                                         useHttps,
                                                                         otp:
                                                                             otp,
+                                                                        totpSecret:
+                                                                            totpSecret,
                                                                         fromRouter:
                                                                             false,
                                                                         context:
@@ -751,6 +851,11 @@ class _ManageRoutersScreenState extends ConsumerState<ManageRoutersScreen> {
                                     );
                                   },
                                 );
+                                ipController.dispose();
+                                userController.dispose();
+                                passController.dispose();
+                                otpController.dispose();
+                                totpSecretController.dispose();
                                 if (!context.mounted) return;
                               },
                             ),

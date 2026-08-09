@@ -5,11 +5,20 @@ import 'package:luci_mobile/services/secure_storage_service.dart';
 import 'package:luci_mobile/services/interfaces/auth_service_interface.dart';
 import 'package:luci_mobile/utils/logger.dart';
 import 'package:luci_mobile/services/luci_auth_protocol.dart';
+import 'package:luci_mobile/services/totp_service.dart';
 
 enum _SavedSessionResult { missing, valid, expired, unavailable }
 
+class TotpEnrollmentException implements Exception {
+  const TotpEnrollmentException();
+
+  @override
+  String toString() => 'Face ID 动态码保存失败，请使用手动验证码重试。';
+}
+
 class RealAuthService implements IAuthService {
-  final SecureStorageService _secureStorageService = SecureStorageService();
+  final SecureStorageService _secureStorageService;
+  final TotpService _totpService;
   final IApiService _apiService;
 
   String? _sysauth;
@@ -18,7 +27,12 @@ class RealAuthService implements IAuthService {
   bool _useHttps = false;
   bool _requiresOtp = false;
 
-  RealAuthService(this._apiService);
+  RealAuthService(
+    this._apiService, {
+    SecureStorageService? secureStorageService,
+    TotpService? totpService,
+  }) : _secureStorageService = secureStorageService ?? SecureStorageService(),
+       _totpService = totpService ?? TotpService();
 
   @override
   String? get sysauth => _sysauth;
@@ -40,14 +54,24 @@ class RealAuthService implements IAuthService {
     String password,
     bool useHttps, {
     String? otp,
+    String? totpSecret,
     BuildContext? context,
   }) async {
+    String? normalizedSecret;
+    var effectiveOtp = otp;
+    if (totpSecret != null && totpSecret.trim().isNotEmpty) {
+      normalizedSecret = _totpService.normalizeSecret(totpSecret);
+      effectiveOtp = await _totpService.generateForLogin(normalizedSecret);
+    }
+    if (context != null && !context.mounted) return;
     await _login(
       ipAddress,
       username,
       password,
       useHttps,
-      otp: otp,
+      otp: effectiveOtp,
+      totpSecretToSave: normalizedSecret,
+      allowStoredTotp: effectiveOtp == null || effectiveOtp.trim().isEmpty,
       context: context,
     );
   }
@@ -58,6 +82,8 @@ class RealAuthService implements IAuthService {
     String pass,
     bool useHttps, {
     String? otp,
+    String? totpSecretToSave,
+    bool allowStoredTotp = true,
     BuildContext? context,
   }) async {
     _sysauth = null;
@@ -67,7 +93,7 @@ class RealAuthService implements IAuthService {
       // Check if the API service is RealApiService to use protocol detection
       if (_apiService is RealApiService) {
         final realApiService = _apiService;
-        final loginResult = await realApiService.loginWithProtocolDetection(
+        var loginResult = await realApiService.loginWithProtocolDetection(
           ip,
           user,
           pass,
@@ -76,7 +102,43 @@ class RealAuthService implements IAuthService {
           context: context,
         );
 
+        if (loginResult.token == null &&
+            loginResult.requiresOtp &&
+            allowStoredTotp &&
+            (otp == null || otp.trim().isEmpty)) {
+          _requiresOtp = true;
+          final storedOtp = await _readStoredTotpCode(
+            ipAddress: ip,
+            username: user,
+          );
+          if (storedOtp != null) {
+            if (context != null && !context.mounted) return false;
+            loginResult = await realApiService.loginWithProtocolDetection(
+              ip,
+              user,
+              pass,
+              loginResult.actualUseHttps,
+              otp: storedOtp,
+              context: context,
+            );
+          }
+        }
+
         if (loginResult.token != null) {
+          if (totpSecretToSave != null) {
+            try {
+              await _secureStorageService.saveTotpSecret(
+                ipAddress: ip,
+                username: user,
+                secret: totpSecretToSave,
+              );
+            } catch (e, stack) {
+              realApiService.forgetSession(ip, loginResult.actualUseHttps);
+              _requiresOtp = true;
+              Logger.exception('Failed to enroll Face ID TOTP', e, stack);
+              throw const TotpEnrollmentException();
+            }
+          }
           _requiresOtp = false;
           _sysauth = loginResult.token;
           _cookieName =
@@ -132,9 +194,28 @@ class RealAuthService implements IAuthService {
 
         return true;
       }
+    } on TotpEnrollmentException {
+      rethrow;
     } catch (e) {
       return false;
     }
+  }
+
+  Future<String?> _readStoredTotpCode({
+    required String ipAddress,
+    required String username,
+  }) async {
+    final configured = await _secureStorageService.hasTotpSecret(
+      ipAddress: ipAddress,
+      username: username,
+    );
+    if (!configured) return null;
+    final secret = await _secureStorageService.readTotpSecret(
+      ipAddress: ipAddress,
+      username: username,
+    );
+    if (secret == null || secret.isEmpty) return null;
+    return _totpService.generateForLogin(secret);
   }
 
   @override

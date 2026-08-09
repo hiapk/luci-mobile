@@ -1,5 +1,6 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:luci_mobile/models/router.dart';
 import 'package:luci_mobile/services/luci_auth_protocol.dart';
 import '../utils/logger.dart';
@@ -11,10 +12,148 @@ class SecureStorageService {
   static const String _routersKey = 'routers';
   static const String _selectedRouterKey = 'selectedRouterId';
   static const String _luciSessionPrefix = 'luciSession:';
+  static const String _totpSecretPrefix = 'luciTotpSecret:';
+  static const String _totpMarkerPrefix = 'luciTotpConfigured:';
+  static const String _totpIndexKey = 'luciTotpIdentityIndex';
+  static const IOSOptions _totpSecretOptions = IOSOptions(
+    accountName: 'app.hiapk.lucimobile2fa.totp',
+    accessibility: KeychainAccessibility.passcode,
+    synchronizable: false,
+    useSecureEnclave: true,
+    accessControlFlags: [AccessControlFlag.biometryCurrentSet],
+    label: 'LuCI Face ID 动态码',
+  );
+  static const IOSOptions _deviceOnlyOptions = IOSOptions(
+    accountName: 'app.hiapk.lucimobile2fa.totp-metadata',
+    accessibility: KeychainAccessibility.unlocked_this_device,
+    synchronizable: false,
+  );
+
+  bool get supportsFaceIdTotp =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
 
   String _luciSessionKey(String ipAddress, bool useHttps) {
     final identity = '${useHttps ? 'https' : 'http'}://$ipAddress';
     return '$_luciSessionPrefix${base64Url.encode(utf8.encode(identity))}';
+  }
+
+  String _totpIdentity(String ipAddress, String username) {
+    final identity = '$ipAddress|$username';
+    return base64Url.encode(utf8.encode(identity));
+  }
+
+  String _totpSecretKey(String identity) => '$_totpSecretPrefix$identity';
+
+  String _totpMarkerKey(String identity) => '$_totpMarkerPrefix$identity';
+
+  Future<Set<String>> _getTotpIdentityIndex() async {
+    final encoded = await _storage.read(
+      key: _totpIndexKey,
+      iOptions: _deviceOnlyOptions,
+    );
+    if (encoded == null || encoded.isEmpty) return <String>{};
+    try {
+      final decoded = jsonDecode(encoded);
+      if (decoded is! List) return <String>{};
+      return decoded
+          .whereType<String>()
+          .where((identity) => identity.isNotEmpty)
+          .toSet();
+    } catch (_) {
+      return <String>{};
+    }
+  }
+
+  Future<void> _saveTotpIdentityIndex(Set<String> identities) async {
+    if (identities.isEmpty) {
+      await _storage.delete(key: _totpIndexKey, iOptions: _deviceOnlyOptions);
+      return;
+    }
+    final sorted = identities.toList()..sort();
+    await _storage.write(
+      key: _totpIndexKey,
+      value: jsonEncode(sorted),
+      iOptions: _deviceOnlyOptions,
+    );
+  }
+
+  Future<bool> hasTotpSecret({
+    required String ipAddress,
+    required String username,
+  }) async {
+    if (!supportsFaceIdTotp) return false;
+    final identity = _totpIdentity(ipAddress, username);
+    return await _storage.read(
+          key: _totpMarkerKey(identity),
+          iOptions: _deviceOnlyOptions,
+        ) ==
+        '1';
+  }
+
+  Future<String?> readTotpSecret({
+    required String ipAddress,
+    required String username,
+  }) async {
+    if (!supportsFaceIdTotp) return null;
+    final identity = _totpIdentity(ipAddress, username);
+    return _storage.read(
+      key: _totpSecretKey(identity),
+      iOptions: _totpSecretOptions,
+    );
+  }
+
+  Future<void> saveTotpSecret({
+    required String ipAddress,
+    required String username,
+    required String secret,
+  }) async {
+    if (!supportsFaceIdTotp) {
+      throw UnsupportedError('Face ID 动态码仅支持 iOS。');
+    }
+    final identity = _totpIdentity(ipAddress, username);
+    await _storage.write(
+      key: _totpSecretKey(identity),
+      value: secret,
+      iOptions: _totpSecretOptions,
+    );
+    try {
+      await _storage.write(
+        key: _totpMarkerKey(identity),
+        value: '1',
+        iOptions: _deviceOnlyOptions,
+      );
+      final identities = await _getTotpIdentityIndex();
+      identities.add(identity);
+      await _saveTotpIdentityIndex(identities);
+    } catch (_) {
+      await _storage.delete(
+        key: _totpSecretKey(identity),
+        iOptions: _totpSecretOptions,
+      );
+      rethrow;
+    }
+  }
+
+  Future<void> deleteTotpSecret({
+    required String ipAddress,
+    required String username,
+  }) async {
+    final identity = _totpIdentity(ipAddress, username);
+    await _deleteTotpIdentity(identity);
+    final identities = await _getTotpIdentityIndex();
+    identities.remove(identity);
+    await _saveTotpIdentityIndex(identities);
+  }
+
+  Future<void> _deleteTotpIdentity(String identity) async {
+    await _storage.delete(
+      key: _totpSecretKey(identity),
+      iOptions: _totpSecretOptions,
+    );
+    await _storage.delete(
+      key: _totpMarkerKey(identity),
+      iOptions: _deviceOnlyOptions,
+    );
   }
 
   Future<void> saveLuciSession({
@@ -125,6 +264,10 @@ class SecureStorageService {
     try {
       // Clear all credentials but preserve reviewer mode flag
       final reviewerMode = await _storage.read(key: AppConfig.reviewerModeKey);
+      final totpIdentities = await _getTotpIdentityIndex();
+      for (final identity in totpIdentities) {
+        await _deleteTotpIdentity(identity);
+      }
       await _storage.deleteAll();
       // Restore reviewer mode flag if it was set
       if (reviewerMode != null) {

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:luci_mobile/main.dart';
 import 'package:luci_mobile/models/router.dart' as model;
+import 'package:luci_mobile/state/app_state.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
@@ -141,6 +142,26 @@ class _LuciWebViewScreenState extends ConsumerState<LuciWebViewScreen> {
     if (_handlingSessionExpiry || !mounted) return;
     _handlingSessionExpiry = true;
 
+    final appState = ref.read(appStateProvider);
+    var success = await appState.login(
+      widget.router.ipAddress,
+      widget.router.username,
+      widget.router.password,
+      widget.router.useHttps,
+      fromRouter: true,
+      context: context,
+    );
+    if (!mounted) return;
+    if (success && appState.sysauth != null) {
+      await _resumeWithCurrentSession(appState);
+      return;
+    }
+    if (!appState.requiresOtp) {
+      await _showLoginError(appState.errorMessage ?? '重新登录失败，请重试。');
+      _handlingSessionExpiry = false;
+      return;
+    }
+
     while (mounted) {
       final otp = await _askForOtp();
       if (!mounted) return;
@@ -149,8 +170,7 @@ class _LuciWebViewScreenState extends ConsumerState<LuciWebViewScreen> {
         return;
       }
 
-      final appState = ref.read(appStateProvider);
-      final success = await appState.login(
+      success = await appState.login(
         widget.router.ipAddress,
         widget.router.username,
         widget.router.password,
@@ -161,18 +181,22 @@ class _LuciWebViewScreenState extends ConsumerState<LuciWebViewScreen> {
       );
       if (!mounted) return;
       if (success && appState.sysauth != null) {
-        _token = appState.sysauth!;
-        _cookieName =
-            appState.authCookieName ??
-            (widget.router.useHttps ? 'sysauth_https' : 'sysauth_http');
-        await _setSessionCookie();
-        await _controller.loadRequest(widget.targetUri);
-        _handlingSessionExpiry = false;
+        await _resumeWithCurrentSession(appState);
         return;
       }
 
       await _showLoginError(appState.errorMessage ?? '重新登录失败，请重试。');
     }
+  }
+
+  Future<void> _resumeWithCurrentSession(AppState appState) async {
+    _token = appState.sysauth!;
+    _cookieName =
+        appState.authCookieName ??
+        (widget.router.useHttps ? 'sysauth_https' : 'sysauth_http');
+    await _setSessionCookie();
+    await _controller.loadRequest(widget.targetUri);
+    _handlingSessionExpiry = false;
   }
 
   Future<String?> _askForOtp() async {
@@ -378,11 +402,7 @@ class _WebToolbarButton extends StatelessWidget {
         minimumSize: const Size.square(44),
         padding: EdgeInsets.zero,
         onPressed: onPressed,
-        child: SizedBox(
-          width: 48,
-          height: 44,
-          child: Icon(icon, size: 22),
-        ),
+        child: SizedBox(width: 48, height: 44, child: Icon(icon, size: 22)),
       ),
     );
   }
