@@ -48,27 +48,25 @@ class OpenClashNetworkService {
     http.Client? ipInfoClient,
     Duration ipInfoTimeout = defaultIpInfoTimeout,
     OpenClashLatencyProbe? latencyProbe,
-  })
-    : _dio =
-          dio ??
-          Dio(
-            BaseOptions(
-              connectTimeout: const Duration(seconds: 5),
-              receiveTimeout: const Duration(seconds: 5),
-              sendTimeout: const Duration(seconds: 5),
-            ),
-          ),
-      _ipInfoClient = ipInfoClient ?? _createIpInfoClient(),
-      _ipInfoTimeout = ipInfoTimeout,
-      _ownsIpInfoClient = ipInfoClient == null,
-      _latencyProbe = latencyProbe;
+  }) : _dio =
+           dio ??
+           Dio(
+             BaseOptions(
+               connectTimeout: const Duration(seconds: 5),
+               receiveTimeout: const Duration(seconds: 5),
+               sendTimeout: const Duration(seconds: 5),
+             ),
+           ),
+       _ipInfoClient = ipInfoClient ?? _createIpInfoClient(),
+       _ipInfoTimeout = ipInfoTimeout,
+       _ownsIpInfoClient = ipInfoClient == null,
+       _latencyProbe = latencyProbe;
 
   Future<OpenClashIpInfo> fetchIpInfo() async {
     try {
-      final response = await _ipInfoClient.get(
-        _ipSbEndpoint,
-        headers: const {'Accept': 'application/json'},
-      ).timeout(_ipInfoTimeout);
+      final response = await _ipInfoClient
+          .get(_ipSbEndpoint, headers: const {'Accept': 'application/json'})
+          .timeout(_ipInfoTimeout);
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw OpenClashIpInfoException(
           OpenClashIpInfoErrorKind.httpStatus,

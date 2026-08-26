@@ -144,10 +144,10 @@ class _LuciWebViewScreenState extends ConsumerState<LuciWebViewScreen> {
 
     final appState = ref.read(appStateProvider);
     var success = await appState.login(
-      widget.router.ipAddress,
+      widget.router.activeAddress,
       widget.router.username,
       widget.router.password,
-      widget.router.useHttps,
+      widget.router.activeUseHttps,
       fromRouter: true,
       context: context,
     );
@@ -171,10 +171,10 @@ class _LuciWebViewScreenState extends ConsumerState<LuciWebViewScreen> {
       }
 
       success = await appState.login(
-        widget.router.ipAddress,
+        widget.router.activeAddress,
         widget.router.username,
         widget.router.password,
-        widget.router.useHttps,
+        widget.router.activeUseHttps,
         otp: otp,
         fromRouter: true,
         context: context,
@@ -193,7 +193,7 @@ class _LuciWebViewScreenState extends ConsumerState<LuciWebViewScreen> {
     _token = appState.sysauth!;
     _cookieName =
         appState.authCookieName ??
-        (widget.router.useHttps ? 'sysauth_https' : 'sysauth_http');
+        (widget.router.activeUseHttps ? 'sysauth_https' : 'sysauth_http');
     await _setSessionCookie();
     await _controller.loadRequest(widget.targetUri);
     _handlingSessionExpiry = false;

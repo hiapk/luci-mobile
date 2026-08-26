@@ -8,6 +8,7 @@ import 'package:luci_mobile/models/dashboard_preferences.dart';
 import 'package:luci_mobile/widgets/luci_app_bar.dart';
 import 'package:luci_mobile/design/luci_design_system.dart';
 import 'package:luci_mobile/widgets/luci_animation_system.dart';
+import 'package:luci_mobile/l10n/luci_localizations.dart';
 
 class RouterDashboardSettingsScreen extends ConsumerStatefulWidget {
   final String routerId;
@@ -64,6 +65,7 @@ class _RouterDashboardSettingsScreenState
       if (appState.dashboardData == null) {
         await appState.fetchDashboardData();
       }
+      if (!mounted) return;
       if (appState.dashboardData == null) {
         setState(() {
           _errorMessage = '无法加载概览数据，请检查连接。';
@@ -75,6 +77,7 @@ class _RouterDashboardSettingsScreenState
       _extractAvailableInterfaces(appState.dashboardData);
       setState(() => _isLoading = false);
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _errorMessage = '设置加载失败：$e';
         _isLoading = false;
@@ -451,7 +454,10 @@ class _RouterDashboardSettingsScreenState
     } else if (lower.contains('wireguard') || lower.startsWith('wg')) {
       return Text('WireGuard VPN', style: LuciTextStyles.cardSubtitle(context));
     } else if (lower.contains('openvpn')) {
-      return Text('OpenVPN', style: LuciTextStyles.cardSubtitle(context));
+      return Text(
+        context.l10n.openVpn,
+        style: LuciTextStyles.cardSubtitle(context),
+      );
     } else if (lower.contains('pppoe')) {
       return Text('PPPoE 连接', style: LuciTextStyles.cardSubtitle(context));
     }

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:luci_mobile/main.dart';
@@ -5,6 +7,7 @@ import 'package:luci_mobile/models/router.dart' as model;
 import 'package:luci_mobile/widgets/luci_app_bar.dart';
 import 'package:luci_mobile/utils/url_parser.dart';
 import 'package:luci_mobile/services/totp_service.dart';
+import 'package:luci_mobile/l10n/luci_localizations.dart';
 
 class ManageRoutersScreen extends ConsumerStatefulWidget {
   const ManageRoutersScreen({super.key});
@@ -16,6 +19,9 @@ class ManageRoutersScreen extends ConsumerStatefulWidget {
 
 class _ManageRoutersScreenState extends ConsumerState<ManageRoutersScreen> {
   String? _switchingRouterId;
+
+  String _truncateAddress(String address) =>
+      address.length > 42 ? '${address.substring(0, 39)}…' : address;
 
   Future<String?> _promptForOtp() async {
     final controller = TextEditingController();
@@ -136,8 +142,10 @@ class _ManageRoutersScreenState extends ConsumerState<ManageRoutersScreen> {
                             ),
                             child: _UnifiedRouterCard(
                               routerTitle: routerTitle,
-                              subtitle:
-                                  '${router.ipAddress} (${router.username})',
+                              subtitle: router.hasFallback
+                                  ? '● ${_truncateAddress(router.activeAddress)}\n'
+                                        '○ ${_truncateAddress(router.inactiveAddress!)}'
+                                  : '${router.ipAddress} (${router.username})',
                               isSelected: isSelected,
                               isSwitching: isSwitching,
                               onTap: () async {
@@ -158,12 +166,18 @@ class _ManageRoutersScreenState extends ConsumerState<ManageRoutersScreen> {
                                         return;
                                       }
                                       final success = await appState.login(
-                                        router.ipAddress,
+                                        router.activeAddress,
                                         router.username,
                                         router.password,
-                                        router.useHttps,
+                                        router.activeUseHttps,
                                         otp: otp,
                                         fromRouter: true,
+                                        alternateAddress:
+                                            router.inactiveAddress,
+                                        alternateUseHttps:
+                                            router.inactiveUseHttps,
+                                        activeAddressIndex:
+                                            router.activeAddressIndex,
                                         context: context,
                                       );
                                       if (!context.mounted) return;
@@ -215,6 +229,19 @@ class _ManageRoutersScreenState extends ConsumerState<ManageRoutersScreen> {
                                   }
                                 }
                               },
+                              onRemoveFallback: router.hasFallback
+                                  ? () async {
+                                      await appState.updateRouter(
+                                        router.copyWith(clearAlternate: true),
+                                      );
+                                      if (isSelected && context.mounted) {
+                                        await appState.selectRouter(
+                                          router.id,
+                                          context: context,
+                                        );
+                                      }
+                                    }
+                                  : null,
                               onDelete: () async {
                                 String routerLabel;
                                 if (isSelected &&
@@ -253,6 +280,17 @@ class _ManageRoutersScreenState extends ConsumerState<ManageRoutersScreen> {
                                 if (!context.mounted) return;
                                 if (confirm == true) {
                                   await appState.removeRouter(router.id);
+                                  if (!context.mounted) return;
+                                  if (appState.routers.isEmpty) {
+                                    unawaited(
+                                      Navigator.of(
+                                        context,
+                                      ).pushNamedAndRemoveUntil(
+                                        '/login',
+                                        (route) => false,
+                                      ),
+                                    );
+                                  }
                                 }
                               },
                             ),
@@ -288,6 +326,8 @@ class _ManageRoutersScreenState extends ConsumerState<ManageRoutersScreen> {
                               ),
                               onPressed: () async {
                                 final ipController = TextEditingController();
+                                final alternateController =
+                                    TextEditingController();
                                 final userController = TextEditingController(
                                   text: 'root',
                                 );
@@ -378,6 +418,60 @@ class _ManageRoutersScreenState extends ConsumerState<ManageRoutersScreen> {
                                                           AutofillHints
                                                               .username,
                                                         ],
+                                                      ),
+                                                      const SizedBox(
+                                                        height: 20,
+                                                      ),
+                                                      TextFormField(
+                                                        controller:
+                                                            alternateController,
+                                                        decoration: InputDecoration(
+                                                          labelText: context
+                                                              .l10n
+                                                              .fallbackAddress,
+                                                          border:
+                                                              const OutlineInputBorder(),
+                                                          prefixIcon:
+                                                              const Icon(
+                                                                Icons
+                                                                    .swap_horiz,
+                                                              ),
+                                                          helperText: context
+                                                              .l10n
+                                                              .fallbackCredentialsHelp,
+                                                          helperMaxLines: 2,
+                                                        ),
+                                                        validator: (value) {
+                                                          if (value == null ||
+                                                              value
+                                                                  .trim()
+                                                                  .isEmpty) {
+                                                            return null;
+                                                          }
+                                                          final parsed =
+                                                              UrlParser.parse(
+                                                                value,
+                                                              );
+                                                          if (!parsed.isValid) {
+                                                            return context
+                                                                .l10n
+                                                                .invalidAddressFormat;
+                                                          }
+                                                          final primary =
+                                                              UrlParser.parse(
+                                                                ipController
+                                                                    .text,
+                                                              );
+                                                          if (primary.isValid &&
+                                                              parsed.hostWithPort ==
+                                                                  primary
+                                                                      .hostWithPort) {
+                                                            return context
+                                                                .l10n
+                                                                .mustDifferFromPrimaryAddress;
+                                                          }
+                                                          return null;
+                                                        },
                                                       ),
                                                       const SizedBox(
                                                         height: 20,
@@ -674,6 +768,37 @@ class _ManageRoutersScreenState extends ConsumerState<ManageRoutersScreen> {
                                                                       return;
                                                                     }
 
+                                                                    String?
+                                                                    alternateAddress;
+                                                                    bool?
+                                                                    alternateUseHttps;
+                                                                    final alternateInput =
+                                                                        alternateController
+                                                                            .text
+                                                                            .trim();
+                                                                    if (alternateInput
+                                                                        .isNotEmpty) {
+                                                                      final parsedAlternate =
+                                                                          UrlParser.parse(
+                                                                            alternateInput,
+                                                                          );
+                                                                      if (!parsedAlternate
+                                                                          .isValid) {
+                                                                        setState(() {
+                                                                          errorMessage =
+                                                                              parsedAlternate.error ??
+                                                                              context.l10n.invalidAddressFormat;
+                                                                        });
+                                                                        return;
+                                                                      }
+                                                                      alternateAddress =
+                                                                          parsedAlternate
+                                                                              .hostWithPort;
+                                                                      alternateUseHttps =
+                                                                          parsedAlternate
+                                                                              .useHttps;
+                                                                    }
+
                                                                     final hostWithPort =
                                                                         parsedUrl
                                                                             .hostWithPort;
@@ -717,6 +842,10 @@ class _ManageRoutersScreenState extends ConsumerState<ManageRoutersScreen> {
                                                                             totpSecret,
                                                                         fromRouter:
                                                                             false,
+                                                                        alternateAddress:
+                                                                            alternateAddress,
+                                                                        alternateUseHttps:
+                                                                            alternateUseHttps,
                                                                         context:
                                                                             context,
                                                                       );
@@ -852,6 +981,7 @@ class _ManageRoutersScreenState extends ConsumerState<ManageRoutersScreen> {
                                   },
                                 );
                                 ipController.dispose();
+                                alternateController.dispose();
                                 userController.dispose();
                                 passController.dispose();
                                 otpController.dispose();
@@ -878,6 +1008,7 @@ class _UnifiedRouterCard extends StatelessWidget {
   final bool isSelected;
   final bool isSwitching;
   final VoidCallback? onTap;
+  final VoidCallback? onRemoveFallback;
   final VoidCallback? onDelete;
 
   const _UnifiedRouterCard({
@@ -886,6 +1017,7 @@ class _UnifiedRouterCard extends StatelessWidget {
     required this.isSelected,
     required this.isSwitching,
     this.onTap,
+    this.onRemoveFallback,
     this.onDelete,
   });
 
@@ -937,7 +1069,7 @@ class _UnifiedRouterCard extends StatelessWidget {
                         fontWeight: FontWeight.bold,
                         color: colorScheme.onSurface,
                       ),
-                      maxLines: 1,
+                      maxLines: 3,
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 4),
@@ -981,6 +1113,38 @@ class _UnifiedRouterCard extends StatelessWidget {
                       ),
                     ),
                   ),
+                ),
+              if (onRemoveFallback != null)
+                IconButton(
+                  icon: const Icon(Icons.link_off),
+                  tooltip: context.l10n.removeFallbackAddress,
+                  onPressed: () async {
+                    final confirm = await showDialog<bool>(
+                      context: context,
+                      builder: (dialogContext) => AlertDialog(
+                        title: Text(
+                          dialogContext.l10n.removeFallbackAddressTitle,
+                        ),
+                        content: Text(
+                          dialogContext.l10n.removeFallbackAddressConfirmation,
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () =>
+                                Navigator.pop(dialogContext, false),
+                            child: Text(dialogContext.l10n.cancel),
+                          ),
+                          TextButton(
+                            onPressed: () => Navigator.pop(dialogContext, true),
+                            child: Text(dialogContext.l10n.remove),
+                          ),
+                        ],
+                      ),
+                    );
+                    if (confirm == true && context.mounted) {
+                      onRemoveFallback!();
+                    }
+                  },
                 ),
               if (onDelete != null)
                 IconButton(

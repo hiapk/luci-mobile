@@ -286,11 +286,7 @@ class _MetaCubeXdScreenState extends ConsumerState<MetaCubeXdScreen> {
     try {
       final result = await ref
           .read(appStateProvider)
-          .testOpenClashDelay(
-            kind: 'group',
-            name: group,
-            context: context,
-          );
+          .testOpenClashDelay(kind: 'group', name: group, context: context);
       await _loadProxies();
       return result;
     } finally {
@@ -718,8 +714,7 @@ class _MetaCubeXdScreenState extends ConsumerState<MetaCubeXdScreen> {
                         vertical: 5,
                       ),
                       minimumSize: const Size(0, 30),
-                      onPressed:
-                          _testingAllGroups || _pendingActions.isNotEmpty
+                      onPressed: _testingAllGroups || _pendingActions.isNotEmpty
                           ? null
                           : () => unawaited(_testAllGroups()),
                       child: Row(
@@ -1758,7 +1753,8 @@ class _ProxyNodeTile extends StatelessWidget {
     final health = OpenClashNodeHealth.fromHistory(
       node?.history ?? const <OpenClashDelayHistoryEntry>[],
     );
-    final hasMetadata = node != null &&
+    final hasMetadata =
+        node != null &&
         (node!.type.isNotEmpty || node!.udp || node!.xudp || node!.tfo);
     return Container(
       constraints: const BoxConstraints(minHeight: 76),

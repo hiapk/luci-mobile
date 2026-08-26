@@ -1,5 +1,13 @@
 import 'package:flutter/material.dart';
 
+/// Result of a login attempt with fallback.
+class FallbackLoginResult {
+  final bool success;
+  final int usedAddressIndex; // 0 = primary, 1 = alternate
+
+  FallbackLoginResult({required this.success, required this.usedAddressIndex});
+}
+
 abstract class IAuthService {
   Future<void> login(
     String ipAddress,
@@ -10,6 +18,21 @@ abstract class IAuthService {
     String? totpSecret,
     BuildContext? context,
   });
+
+  /// Try active address first, then fallback to the other.
+  Future<FallbackLoginResult> loginWithFallback({
+    required String activeAddress,
+    required bool activeHttps,
+    required int activeIndex,
+    String? fallbackAddress,
+    bool? fallbackHttps,
+    required String username,
+    required String password,
+    String? otp,
+    String? totpSecret,
+    BuildContext? context,
+  });
+
   Future<bool> tryAutoLogin(
     String? ipAddress,
     String? username,

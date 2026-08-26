@@ -9,6 +9,7 @@ import 'package:luci_mobile/design/luci_design_system.dart';
 import 'package:luci_mobile/widgets/luci_loading_states.dart';
 import 'package:luci_mobile/widgets/luci_refresh_components.dart';
 import 'package:luci_mobile/widgets/luci_animation_system.dart';
+import 'package:luci_mobile/l10n/luci_localizations.dart';
 
 class ClientsScreen extends ConsumerStatefulWidget {
   const ClientsScreen({super.key});
@@ -17,11 +18,11 @@ class ClientsScreen extends ConsumerStatefulWidget {
   ConsumerState<ClientsScreen> createState() => _ClientsScreenState();
 }
 
-class _ClientsScreenState extends ConsumerState<ClientsScreen>
-    with SingleTickerProviderStateMixin {
+class _ClientsScreenState extends ConsumerState<ClientsScreen> {
   String _searchQuery = '';
-  final Set<int> _expandedClientIndices = {};
-  late AnimationController _controller;
+  // Track expansion by client identity (MAC/IP), not list index - indices
+  // shift when the search filter or the underlying data reorders the list.
+  final Set<String> _expandedClientKeys = {};
   late TextEditingController _searchController;
   Future<List<Client>>? _clientsFuture;
   String? _lastSelectedRouterId;
@@ -29,10 +30,6 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen>
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
-      duration: const Duration(milliseconds: 200),
-      vsync: this,
-    );
     _searchController = TextEditingController();
     _searchController.addListener(() {
       if (_searchQuery != _searchController.text) {
@@ -93,7 +90,6 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen>
 
   @override
   void dispose() {
-    _controller.dispose();
     _searchController.dispose();
     super.dispose();
   }
@@ -256,8 +252,10 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen>
                                   itemCount: filteredClients.length,
                                   itemBuilder: (context, index) {
                                     final client = filteredClients[index];
-                                    final isExpanded = _expandedClientIndices
-                                        .contains(index);
+                                    final clientKey =
+                                        '${client.macAddress}|${client.ipAddress}';
+                                    final isExpanded = _expandedClientKeys
+                                        .contains(clientKey);
 
                                     return LuciSlideTransition(
                                       direction: LuciSlideDirection.up,
@@ -279,12 +277,12 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen>
                                           onTap: () {
                                             setState(() {
                                               if (isExpanded) {
-                                                _expandedClientIndices.remove(
-                                                  index,
+                                                _expandedClientKeys.remove(
+                                                  clientKey,
                                                 );
                                               } else {
-                                                _expandedClientIndices.add(
-                                                  index,
+                                                _expandedClientKeys.add(
+                                                  clientKey,
                                                 );
                                               }
                                             });
@@ -430,11 +428,9 @@ class _UnifiedClientCardState extends State<_UnifiedClientCard>
                               width: 10,
                               height: 10,
                               decoration: BoxDecoration(
-                                color:
-                                    widget.client.connectionType ==
-                                            ConnectionType.wireless ||
-                                        widget.client.connectionType ==
-                                            ConnectionType.wired
+                                color: widget.client.isOnline == false
+                                    ? Colors.grey
+                                    : widget.client.isOnline == true
                                     ? Colors.green
                                     : Colors.amber,
                                 shape: BoxShape.circle,
@@ -492,10 +488,7 @@ class _UnifiedClientCardState extends State<_UnifiedClientCard>
                         ],
                       ),
                     ),
-                    _buildConnectionTypeChip(
-                      context,
-                      widget.client.connectionType,
-                    ),
+                    _buildConnectionTypeChip(context, widget.client),
                     const SizedBox(width: 8),
                     Icon(
                       widget.isExpanded ? Icons.expand_less : Icons.expand_more,
@@ -520,33 +513,31 @@ class _UnifiedClientCardState extends State<_UnifiedClientCard>
     );
   }
 
-  Widget _buildConnectionTypeChip(BuildContext context, ConnectionType type) {
+  Widget _buildConnectionTypeChip(BuildContext context, Client client) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    String label;
+    final label = _connectionLabel(context, client);
     IconData icon;
     Color bgColor;
     Color fgColor;
 
-    switch (type) {
-      case ConnectionType.wireless:
-        label = 'Wi-Fi';
-        icon = Icons.wifi;
-        bgColor = colorScheme.primaryContainer;
-        fgColor = colorScheme.onPrimaryContainer;
-        break;
-      case ConnectionType.wired:
-        label = '有线';
-        icon = Icons.settings_ethernet;
-        bgColor = colorScheme.secondaryContainer;
-        fgColor = colorScheme.onSecondaryContainer;
-        break;
-      default:
-        label = '未知';
-        icon = Icons.devices_other_outlined;
-        bgColor = colorScheme.surfaceContainerHighest;
-        fgColor = colorScheme.onSurfaceVariant;
-        break;
+    if (client.isOnline == false) {
+      icon = Icons.cloud_off_outlined;
+      bgColor = colorScheme.surfaceContainerHighest;
+      fgColor = colorScheme.onSurfaceVariant;
+    } else if (client.wifiBand != null ||
+        client.connectionType == ConnectionType.wireless) {
+      icon = Icons.wifi;
+      bgColor = colorScheme.primaryContainer;
+      fgColor = colorScheme.onPrimaryContainer;
+    } else if (client.connectionType == ConnectionType.wired) {
+      icon = Icons.settings_ethernet;
+      bgColor = colorScheme.secondaryContainer;
+      fgColor = colorScheme.onSecondaryContainer;
+    } else {
+      icon = Icons.devices_other_outlined;
+      bgColor = colorScheme.surfaceContainerHighest;
+      fgColor = colorScheme.onSurfaceVariant;
     }
 
     return Chip(
@@ -599,8 +590,8 @@ class _UnifiedClientCardState extends State<_UnifiedClientCard>
                   if (onTap != null)
                     GestureDetector(
                       onTap: onTap,
-                      child: const Padding(
-                        padding: EdgeInsets.only(left: 8.0),
+                      child: Padding(
+                        padding: const EdgeInsets.only(left: 8.0),
                         child: Icon(
                           Icons.copy_all_outlined,
                           size: 16,
@@ -666,8 +657,10 @@ class _UnifiedClientCardState extends State<_UnifiedClientCard>
             valueColor: client.formattedLeaseTime == 'Expired'
                 ? theme.colorScheme.error
                 : null,
-            semanticsLabel:
-                'Lease Time Remaining: ${client.formattedLeaseTime}',
+            semanticsLabel: context.l10n.detailSemantics(
+              context.l10n.leaseTimeRemaining,
+              _leaseTime(context, client),
+            ),
           ),
           if (widget.onDisconnect != null)
             Padding(
@@ -721,6 +714,23 @@ class _UnifiedClientCardState extends State<_UnifiedClientCard>
     } else {
       return shown;
     }
+  }
+
+  String _connectionLabel(BuildContext context, Client client) {
+    if (client.isOnline == false) return context.l10n.offline;
+    if (client.wifiBand != null) return client.connectionLabel;
+    return switch (client.connectionType) {
+      ConnectionType.wireless => context.l10n.wifi,
+      ConnectionType.wired => context.l10n.ethernet,
+      ConnectionType.unknown => context.l10n.unknown,
+    };
+  }
+
+  String _leaseTime(BuildContext context, Client client) {
+    final seconds = client.leaseTime;
+    if (seconds == null || seconds == 0) return context.l10n.unlimited;
+    if (seconds < 0) return context.l10n.expired;
+    return Client.formatDuration(seconds);
   }
 
   void _copyToClipboard(BuildContext context, String text, String label) {

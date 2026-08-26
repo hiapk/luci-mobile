@@ -2,12 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:luci_mobile/main.dart';
 import 'package:flutter/services.dart';
+import 'package:luci_mobile/models/glinet_data.dart';
 import 'package:luci_mobile/models/interface.dart';
+import 'package:luci_mobile/utils/wifi_utils.dart';
 import 'dart:math';
 import 'package:luci_mobile/widgets/luci_app_bar.dart';
 import 'package:luci_mobile/design/luci_design_system.dart';
 import 'package:luci_mobile/widgets/luci_loading_states.dart';
 import 'package:luci_mobile/widgets/luci_refresh_components.dart';
+import 'package:luci_mobile/screens/wifi_scan_screen.dart';
+import 'package:luci_mobile/l10n/luci_localizations.dart';
 
 class InterfacesScreen extends ConsumerStatefulWidget {
   final String? scrollToInterface;
@@ -30,13 +34,8 @@ class _InterfacesScreenState extends ConsumerState<InterfacesScreen> {
   final Map<String, GlobalKey> _interfaceKeys = {};
 
   /// Safely extract a String from a UCI config value that may be a List or String.
-  static String _uciString(dynamic value, [String fallback = '']) {
-    if (value is String) return value;
-    if (value is List) {
-      return value.isNotEmpty ? value.first.toString() : fallback;
-    }
-    return value?.toString() ?? fallback;
-  }
+  static String _uciString(dynamic value, [String fallback = '']) =>
+      uciString(value, fallback);
 
   // Unified key generator for all interfaces
   String _interfaceKey({String? name, String? ssid, String? deviceName}) {
@@ -60,28 +59,47 @@ class _InterfacesScreenState extends ConsumerState<InterfacesScreen> {
     String? radioName,
     String? deviceName,
     String? name,
+    String? sectionName,
+    String? ifname,
   }) {
     final radio = (radioName ?? '').trim();
     final ssidTrimmed = (ssid ?? '').trim();
 
-    // If SSID is empty, we need to ensure uniqueness even with same radio
-    if (ssidTrimmed.isEmpty) {
-      // Use device name as fallback for uniqueness
-      final device = (deviceName ?? '').trim();
-      if (device.isNotEmpty && device != radio) {
-        return '${ssidTrimmed.toLowerCase()}__${device.toLowerCase()}';
-      }
-      // Use interface name as fallback
-      final interfaceName = (name ?? '').trim();
-      if (interfaceName.isNotEmpty && interfaceName != radio) {
-        return '${ssidTrimmed.toLowerCase()}__${interfaceName.toLowerCase()}';
-      }
-      // If all names are the same, add a unique suffix
-      return '${ssidTrimmed.toLowerCase()}__${radio.toLowerCase()}_${DateTime.now().millisecondsSinceEpoch}';
+    // The UCI section name is the primary identity: it is unique per
+    // wireless interface config and computable by both the scroll-targeting
+    // and rendering paths. Keying on the section alone keeps state stable
+    // across SSID edits and runtime/configuration-only transitions. Section
+    // names are case-sensitive on the router, so preserve case here - two
+    // sections may differ only by case and must not share a GlobalKey.
+    //
+    // Section- and ifname-derived keys use distinct namespaces so a missing
+    // section on one row cannot collide with another row whose section
+    // happens to equal an ifname (e.g. section 'wlan0' vs ifname 'wlan0').
+    final section = (sectionName ?? '').trim();
+    if (section.isNotEmpty) {
+      return 'uci-section__$section';
     }
 
-    // If SSID is not empty, use SSID + radio
-    return '${ssidTrimmed.toLowerCase()}__${radio.toLowerCase()}';
+    // Runtime interfaces expose their OS interface name as a secondary
+    // unique identity, in its own namespace (see above).
+    final ifnameTrimmed = (ifname ?? '').trim();
+    if (ifnameTrimmed.isNotEmpty) {
+      return 'ifname__$ifnameTrimmed';
+    }
+
+    // Compose whatever distinct fields remain so records cannot collide on
+    // a shared prefix; two records agreeing on every field are data-wise
+    // indistinguishable.
+    final parts = <String>[
+      if (ssidTrimmed.isNotEmpty) ssidTrimmed.toLowerCase(),
+      if (deviceName != null && deviceName.trim().isNotEmpty)
+        deviceName.trim().toLowerCase(),
+      if (name != null && name.trim().isNotEmpty) name.trim().toLowerCase(),
+    ];
+    if (parts.isNotEmpty) {
+      return ['wireless', ...parts].join('__');
+    }
+    return 'wireless__$radio';
   }
 
   @override
@@ -156,9 +174,49 @@ class _InterfacesScreenState extends ConsumerState<InterfacesScreen> {
               dashboardData['wireless'] as Map<String, dynamic>?;
           if (wirelessData != null) {
             final normalizedTarget = _normalizeInterfaceKey(interfaceName);
-            wirelessData.forEach((radioName, radioData) {
-              final interfaces = radioData['interfaces'] as List<dynamic>?;
-              if (interfaces != null) {
+            final rawTarget = interfaceName.trim();
+
+            // Returns the card key for a wireless interface whose UCI
+            // section matches the target exactly (case-sensitive), so an
+            // exact variant always wins over a merely normalized one.
+            String? findExactSectionMatch() {
+              String? match;
+              wirelessData.forEach((radioName, radioData) {
+                if (match != null) return;
+                final interfaces = radioData['interfaces'] as List<dynamic>?;
+                if (interfaces == null) return;
+                for (final interface in interfaces) {
+                  final sectionName = interface['section'] as String?;
+                  if (sectionName != null &&
+                      sectionName.trim().isNotEmpty &&
+                      sectionName.trim() == rawTarget) {
+                    final config = interface['config'] ?? {};
+                    final iwinfo = interface['iwinfo'] ?? {};
+                    match = _interfaceKeyForWireless(
+                      ssid: _uciString(iwinfo['ssid']).isNotEmpty
+                          ? _uciString(iwinfo['ssid'])
+                          : _uciString(config['ssid']),
+                      radioName: radioName,
+                      deviceName: _uciString(config['device'], radioName),
+                      name: interface['name'] ?? '',
+                      sectionName: sectionName,
+                      ifname: interface['ifname'] as String?,
+                    );
+                    return;
+                  }
+                }
+              });
+              return match;
+            }
+
+            // Returns the card key using the broader alias matching
+            // (normalized SSID/device/name/section).
+            String? findAliasMatch() {
+              String? match;
+              wirelessData.forEach((radioName, radioData) {
+                if (match != null) return;
+                final interfaces = radioData['interfaces'] as List<dynamic>?;
+                if (interfaces == null) return;
                 for (var i = 0; i < interfaces.length; i++) {
                   final interface = interfaces[i];
                   final config = interface['config'] ?? {};
@@ -168,26 +226,38 @@ class _InterfacesScreenState extends ConsumerState<InterfacesScreen> {
                       ? _uciString(iwinfo['ssid'])
                       : _uciString(config['ssid']);
                   final name = interface['name'] ?? '';
+                  final sectionName = interface['section'] as String?;
                   final keyStr = _interfaceKeyForWireless(
                     ssid: ssid,
                     radioName: radioName,
                     deviceName: deviceName,
                     name: name,
+                    sectionName: sectionName,
+                    ifname: interface['ifname'] as String?,
                   );
-                  // Generate all possible normalized keys for matching
-                  final ssidKey = _normalizeInterfaceKey(ssid);
-                  final deviceKey = _normalizeInterfaceKey(deviceName);
-                  final nameKey = _normalizeInterfaceKey(name);
-                  // Match against all possible keys
-                  if (normalizedTarget == ssidKey ||
-                      normalizedTarget == deviceKey ||
-                      normalizedTarget == nameKey) {
-                    _scrollToExpandedCard(keyStr);
+                  // Keys preserve section case (distinct sections must not
+                  // share a GlobalKey), but target matching normalizes case
+                  // so e.g. "GUEST" finds "Guest".
+                  if (normalizedTarget == _normalizeInterfaceKey(ssid) ||
+                      normalizedTarget == _normalizeInterfaceKey(deviceName) ||
+                      normalizedTarget == _normalizeInterfaceKey(name) ||
+                      normalizedTarget == _normalizeInterfaceKey(sectionName)) {
+                    match = keyStr;
                     return;
                   }
                 }
-              }
-            });
+              });
+              return match;
+            }
+
+            final matchedKey = findExactSectionMatch() ?? findAliasMatch();
+            if (matchedKey != null) {
+              // Returning from the outer callback is essential: falling
+              // through would start the fallback section scroll on top of
+              // this one and could invoke onScrollComplete twice.
+              _scrollToExpandedCard(matchedKey);
+              return;
+            }
           }
         }
 
@@ -407,7 +477,34 @@ class _InterfacesScreenState extends ConsumerState<InterfacesScreen> {
                     slivers: [
                       SliverToBoxAdapter(child: LuciSectionHeader('有线接口')),
                       _buildWiredInterfacesList(),
-                      SliverToBoxAdapter(child: LuciSectionHeader('无线网络')),
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                '无线网络',
+                                style: LuciTextStyles.sectionHeader(context),
+                              ),
+                              TextButton.icon(
+                                onPressed: () {
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute<void>(
+                                      builder: (_) => const WifiScanScreen(),
+                                    ),
+                                  );
+                                },
+                                icon: const Icon(Icons.cell_tower, size: 16),
+                                label: const Text('扫描'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                       _buildWirelessInterfacesList(),
                       SliverToBoxAdapter(
                         child: Padding(
@@ -457,6 +554,30 @@ class _InterfacesScreenState extends ConsumerState<InterfacesScreen> {
         }
         return NetworkInterface.fromJson(detailedInterfaceMap);
       }).toList();
+
+      // Enrich Tailscale interface with GL.iNet API data
+      final glInetData = appState.dashboardData?['glinet'] as GlInetData?;
+      if (glInetData?.tailscaleIp != null) {
+        interfacesList = interfacesList.map((iface) {
+          if (iface.name.toLowerCase() == 'tailscale' &&
+              iface.ipAddress == null) {
+            return NetworkInterface(
+              name: iface.name,
+              isUp: iface.isUp,
+              protocol: 'tailscale',
+              uptime: iface.uptime,
+              device: iface.device,
+              ipAddress: glInetData!.tailscaleIp,
+              netmask: iface.netmask,
+              gateway: iface.gateway,
+              dnsServers: iface.dnsServers,
+              stats: iface.stats,
+              ipv6Addresses: iface.ipv6Addresses,
+            );
+          }
+          return iface;
+        }).toList();
+      }
     }
 
     final interfaces = interfacesList;
@@ -494,19 +615,23 @@ class _InterfacesScreenState extends ConsumerState<InterfacesScreen> {
     final dashboardData = appState.dashboardData;
     final wirelessData = dashboardData?['wireless'] as Map<String, dynamic>?;
     final uciWirelessConfig = dashboardData?['uciWirelessConfig'];
+    final glInetData = dashboardData?['glinet'] as GlInetData?;
     final interfacesList = <Map<String, dynamic>>[];
 
     final uciRadios = <String, Map>{};
-    final uciInterfaces = <String, Map>{};
+    final uciInterfaces = <String, Map<String, dynamic>>{};
 
-    final uciValues = uciWirelessConfig?['values'] as Map?;
+    // Try 'values' key (real API) then 'wireless' key (mock data)
+    final uciValues =
+        (uciWirelessConfig?['values'] as Map?) ??
+        (uciWirelessConfig?['wireless'] as Map?);
     if (uciValues != null) {
       uciValues.forEach((key, value) {
-        final typedValue = value as Map?;
-        if (typedValue?['.type'] == 'wifi-device') {
-          uciRadios[key] = typedValue!;
-        } else if (typedValue?['.type'] == 'wifi-iface') {
-          uciInterfaces[key] = typedValue!;
+        if (value is! Map) return;
+        if (value['.type'] == 'wifi-device') {
+          uciRadios[key.toString()] = value;
+        } else if (value['.type'] == 'wifi-iface') {
+          uciInterfaces[key.toString()] = Map<String, dynamic>.from(value);
         }
       });
     }
@@ -525,7 +650,10 @@ class _InterfacesScreenState extends ConsumerState<InterfacesScreen> {
             }
 
             final isRadioEnabled = uciRadios[radioName]?['disabled'] != '1';
-            final isIfaceEnabled = config['disabled'] != '1';
+            final isIfaceEnabled =
+                config['disabled'] != '1' &&
+                config['disabled'] != 1 &&
+                config['disabled'] != true;
             final isEnabled = isRadioEnabled && isIfaceEnabled;
 
             final name = iface['name'] ?? '';
@@ -536,6 +664,26 @@ class _InterfacesScreenState extends ConsumerState<InterfacesScreen> {
             final mode = _uciString(config['mode']).toUpperCase().isNotEmpty
                 ? _uciString(config['mode']).toUpperCase()
                 : (iwinfo['mode']?.toString().toUpperCase() ?? 'N/A');
+            final glInetRadio = glInetData?.radioForDevice(radioName);
+            final channel =
+                normalizeWifiChannel(iwinfo['channel']) ??
+                normalizeWifiChannel(config['channel']) ??
+                normalizeWifiChannel(glInetRadio?.channel) ??
+                'N/A';
+            final bandStr =
+                glInetRadio?.band ?? config['band']?.toString() ?? '';
+            final bandLabel = formatWifiBand(bandStr);
+            final subtitleParts = <String>[mode];
+            if (bandLabel.isNotEmpty) subtitleParts.add(bandLabel);
+            subtitleParts.add(context.l10n.channelShort(channel));
+
+            // Build encryption description
+            final rawEncIwinfo = iwinfo['encryption'];
+            final encIwinfo = rawEncIwinfo is Map ? rawEncIwinfo : null;
+            final encDescription =
+                encIwinfo?['description'] ??
+                _uciString(config['encryption'], 'N/A');
+
             interfacesList.add({
               'name': _uciString(config['ssid']).isNotEmpty
                   ? _uciString(config['ssid'])
@@ -543,10 +691,23 @@ class _InterfacesScreenState extends ConsumerState<InterfacesScreen> {
               'subtitle':
                   '$mode • 信道 ${iwinfo['channel']?.toString() ?? _uciString(config['channel'], 'N/A')}',
               'isEnabled': isEnabled,
+              'isIfaceEnabled': isIfaceEnabled,
+              'isRadioEnabled': isRadioEnabled,
               'deviceName': deviceName,
               'radioName': radioName,
               'ssid': ssid,
               'interfaceName': name,
+              'section': uciName,
+              'uciSection': uciName,
+              'ifname': iface['ifname'] as String?,
+              'mode': mode,
+              'encryption': _uciString(config['encryption']),
+              'encryptionDescription': encDescription,
+              'network': (config['network'] is List)
+                  ? (config['network'] as List).join(', ')
+                  : config['network']?.toString() ?? '',
+              'channel': channel,
+              'signal': iwinfo['signal']?.toString() ?? '--',
               'details': {
                 '设备': _uciString(config['device'], radioName),
                 '模式': _uciString(config['mode']).isNotEmpty
@@ -571,18 +732,35 @@ class _InterfacesScreenState extends ConsumerState<InterfacesScreen> {
         final radioName = _uciString(config['device']);
         final isRadioEnabled = uciRadios[radioName]?['disabled'] != '1';
         final isIfaceEnabled = _uciString(config['disabled']) != '1';
-        final isEnabled = isRadioEnabled && isIfaceEnabled;
+        final mode = config['mode'] ?? 'N/A';
+        final glInetRadio = glInetData?.radioForDevice(radioName);
+        final channel = resolveWifiChannel(
+          actual: glInetRadio?.channel,
+          configured: uciRadios[radioName]?['channel'],
+        );
 
-        final name = _uciString(config['ssid'], 'Unnamed');
+        final name = _uciString(config['ssid'], context.l10n.unnamed);
         interfacesList.add({
           'name': name,
           'subtitle':
               '${_uciString(config['mode'], 'N/A').toUpperCase()} • 已停用',
-          'isEnabled': isEnabled,
+          'isEnabled': false,
+          'isIfaceEnabled': isIfaceEnabled,
+          'isRadioEnabled': isRadioEnabled,
           'deviceName': radioName,
           'radioName': radioName,
           'ssid': name,
           'interfaceName': name,
+          'section': uciName,
+          'uciSection': uciName,
+          'mode': mode,
+          'encryption': _uciString(config['encryption']),
+          'encryptionDescription': _uciString(config['encryption'], 'N/A'),
+          'network': (config['network'] is List)
+              ? (config['network'] as List).join(', ')
+              : config['network']?.toString() ?? '',
+          'channel': channel,
+          'signal': '--',
           'details': {
             '设备': radioName,
             '模式': _uciString(config['mode'], 'N/A'),
@@ -599,6 +777,49 @@ class _InterfacesScreenState extends ConsumerState<InterfacesScreen> {
     if (interfaces.isEmpty) {
       return const SliverToBoxAdapter(child: SizedBox.shrink());
     }
+    final target = _targetInterface;
+
+    // Resolve the target to exactly ONE wireless card key, using the same
+    // exact-section-first then normalized-alias order as the scroll
+    // targeting path. Resolving up front guarantees a case-insensitive
+    // target (e.g. "GUEST") cannot expand several case-variant cards at
+    // once - only the card the screen would scroll to expands.
+    String? resolvedTargetKey;
+    if (target != null) {
+      String? keyOf(Map<String, dynamic> iface) => _interfaceKeyForWireless(
+        ssid: iface['ssid'] ?? '',
+        radioName: iface['radioName'] ?? '',
+        deviceName: iface['deviceName'] ?? '',
+        name: iface['interfaceName'] ?? '',
+        sectionName: iface['section'] as String?,
+        ifname: iface['ifname'] as String?,
+      );
+      // Pass 1: exact (case-sensitive) section match.
+      for (final iface in interfaces) {
+        final section = (iface['section'] as String?)?.trim() ?? '';
+        if (section.isNotEmpty && section == target.trim()) {
+          resolvedTargetKey = keyOf(iface);
+          break;
+        }
+      }
+      // Pass 2: normalized alias fallback (SSID/device/name/section).
+      final normalizedTarget = _normalizeInterfaceKey(target);
+      if (resolvedTargetKey == null) {
+        for (final iface in interfaces) {
+          if (normalizedTarget == _normalizeInterfaceKey(iface['ssid'] ?? '') ||
+              normalizedTarget ==
+                  _normalizeInterfaceKey(iface['deviceName'] ?? '') ||
+              normalizedTarget ==
+                  _normalizeInterfaceKey(iface['interfaceName'] ?? '') ||
+              normalizedTarget ==
+                  _normalizeInterfaceKey(iface['section'] as String?)) {
+            resolvedTargetKey = keyOf(iface);
+            break;
+          }
+        }
+      }
+    }
+
     return SliverList(
       delegate: SliverChildBuilderDelegate((context, index) {
         final iface = interfaces[index];
@@ -612,21 +833,17 @@ class _InterfacesScreenState extends ConsumerState<InterfacesScreen> {
           radioName: radioName,
           deviceName: deviceName,
           name: name,
+          sectionName: iface['section'] as String?,
+          ifname: iface['ifname'] as String?,
         );
         final key = _interfaceKeys.putIfAbsent(keyStr, () => GlobalKey());
         final displayName = ssid.toString().isNotEmpty
             ? ssid.toString()
             : deviceName.toString();
 
-        // Check if this is the target interface for expansion
+        // Only the single resolved card expands; see resolution above.
         final isTargetInterface =
-            _targetInterface != null &&
-            (_normalizeInterfaceKey(ssid) ==
-                    _normalizeInterfaceKey(_targetInterface!) ||
-                _normalizeInterfaceKey(deviceName) ==
-                    _normalizeInterfaceKey(_targetInterface!) ||
-                _normalizeInterfaceKey(name) ==
-                    _normalizeInterfaceKey(_targetInterface!));
+            resolvedTargetKey != null && keyStr == resolvedTargetKey;
 
         final shouldExpand = isTargetInterface || _expandedInterface == keyStr;
         return Padding(
@@ -637,11 +854,159 @@ class _InterfacesScreenState extends ConsumerState<InterfacesScreen> {
             subtitle: iface['subtitle'],
             isUp: iface['isEnabled'],
             icon: Icons.wifi,
-            details: _buildGenericDetails(context, iface['details']),
+            details: _buildWirelessDetails(context, iface),
             initiallyExpanded: shouldExpand,
           ),
         );
       }, childCount: interfaces.length),
+    );
+  }
+
+  Widget _buildWirelessDetails(
+    BuildContext context,
+    Map<String, dynamic> iface,
+  ) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final details = iface['details'] as Map<String, dynamic>;
+    final uciSection = iface['uciSection'] as String? ?? '';
+    final isIfaceEnabled = iface['isIfaceEnabled'] as bool? ?? true;
+    final mode = iface['mode']?.toString() ?? '';
+    final encDescription = iface['encryptionDescription']?.toString() ?? '';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Details rows
+        ...details.entries.map((entry) {
+          return _buildDetailRow(context, entry.key, entry.value.toString());
+        }),
+        // Encryption row
+        if (encDescription.isNotEmpty && encDescription != 'N/A')
+          _buildDetailRow(context, context.l10n.encryption, encDescription),
+
+        const Divider(height: 1, indent: 16, endIndent: 16),
+        const SizedBox(height: 8),
+
+        // Management action buttons
+        if (uciSection.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 12.0,
+              vertical: 4.0,
+            ),
+            child: Column(
+              children: [
+                // Enable/Disable toggle row
+                _WifiToggleRow(
+                  uciSection: uciSection,
+                  isEnabled: isIfaceEnabled,
+                ),
+
+                const SizedBox(height: 8),
+
+                // Action buttons row
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => _showEditWifiSheet(context, iface),
+                        icon: Icon(Icons.edit_outlined, size: 18),
+                        label: Text(context.l10n.edit),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: colorScheme.primary,
+                          side: BorderSide(
+                            color: colorScheme.primary.withValues(alpha: 0.5),
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => _showDeleteWifiDialog(context, iface),
+                        icon: Icon(Icons.delete_outline, size: 18),
+                        label: Text(context.l10n.remove),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: colorScheme.error,
+                          side: BorderSide(
+                            color: colorScheme.error.withValues(alpha: 0.5),
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 4),
+
+                // Mode label
+                if (mode.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      mode.toLowerCase() == 'sta'
+                          ? context.l10n.clientStationMode
+                          : mode.toLowerCase() == 'ap'
+                          ? context.l10n.accessPointMode
+                          : context.l10n.modeValue(mode.toUpperCase()),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          )
+        else
+          // No UCI section - just show details
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Text(
+              context.l10n.limitedInterfaceManagement,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ),
+
+        const SizedBox(height: 8),
+      ],
+    );
+  }
+
+  void _showEditWifiSheet(BuildContext context, Map<String, dynamic> iface) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => _WifiEditBottomSheet(iface: iface),
+    );
+  }
+
+  void _showDeleteWifiDialog(BuildContext context, Map<String, dynamic> iface) {
+    final ssid = iface['ssid']?.toString() ?? context.l10n.thisInterface;
+    final uciSection = iface['uciSection'] as String? ?? '';
+    final mode = iface['mode']?.toString() ?? 'ap';
+    if (uciSection.isEmpty) return;
+
+    showDialog(
+      context: context,
+      builder: (ctx) =>
+          _WifiDeleteDialog(ssid: ssid, uciSection: uciSection, mode: mode),
     );
   }
 
@@ -673,13 +1038,16 @@ class _InterfacesScreenState extends ConsumerState<InterfacesScreen> {
             context,
             '网关',
             interface.gateway!,
-            onTap: () =>
-                _copyToClipboard(context, interface.gateway!, 'Gateway IP'),
+            onTap: () => _copyToClipboard(
+              context,
+              interface.gateway!,
+              context.l10n.gatewayIp,
+            ),
           ),
         if (interface.dnsServers.isNotEmpty)
           _buildDetailRow(
             context,
-            'DNS',
+            context.l10n.dns,
             interface.dnsServers.join(', '),
             onTap: () => _copyToClipboard(
               context,
@@ -879,17 +1247,6 @@ class _InterfacesScreenState extends ConsumerState<InterfacesScreen> {
     );
   }
 
-  Widget _buildGenericDetails(
-    BuildContext context,
-    Map<String, dynamic> details,
-  ) {
-    return Column(
-      children: details.entries.map((entry) {
-        return _buildDetailRow(context, entry.key, entry.value.toString());
-      }).toList(),
-    );
-  }
-
   Widget _buildDetailRow(
     BuildContext context,
     String title,
@@ -926,8 +1283,8 @@ class _InterfacesScreenState extends ConsumerState<InterfacesScreen> {
                 if (onTap != null)
                   GestureDetector(
                     onTap: onTap,
-                    child: const Padding(
-                      padding: EdgeInsets.only(left: 8.0),
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: 8.0),
                       child: Icon(
                         Icons.copy_all_outlined,
                         size: 16,
@@ -1210,9 +1567,7 @@ class _UnifiedNetworkCardState extends State<_UnifiedNetworkCard>
                           right: 0,
                           top: 0,
                           child: Tooltip(
-                            message: widget.isUp
-                                ? '接口已连接'
-                                : '接口已断开',
+                            message: widget.isUp ? '接口已连接' : '接口已断开',
                             child: LuciStatusIndicators.statusDot(
                               context,
                               widget.isUp,
@@ -1244,8 +1599,7 @@ class _UnifiedNetworkCardState extends State<_UnifiedNetworkCard>
                           Text(
                             widget.subtitle,
                             style: LuciTextStyles.cardSubtitle(context),
-                            semanticsLabel:
-                                '接口详情：${widget.subtitle}',
+                            semanticsLabel: '接口详情：${widget.subtitle}',
                           ),
                         ],
                       ),
@@ -1264,9 +1618,7 @@ class _UnifiedNetworkCardState extends State<_UnifiedNetworkCard>
                       _isExpanded ? Icons.expand_less : Icons.expand_more,
                       color: colorScheme.onSurfaceVariant,
                       size: 26,
-                      semanticLabel: _isExpanded
-                          ? '收起详情'
-                          : '展开详情',
+                      semanticLabel: _isExpanded ? '收起详情' : '展开详情',
                     ),
                   ],
                 ),
@@ -1312,5 +1664,740 @@ class _UnifiedNetworkCardState extends State<_UnifiedNetworkCard>
       );
     }
     return card;
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────
+// WiFi Enable/Disable Toggle Row
+// ──────────────────────────────────────────────────────────────────
+
+class _WifiToggleRow extends ConsumerStatefulWidget {
+  final String uciSection;
+  final bool isEnabled;
+
+  const _WifiToggleRow({required this.uciSection, required this.isEnabled});
+
+  @override
+  ConsumerState<_WifiToggleRow> createState() => _WifiToggleRowState();
+}
+
+class _WifiToggleRowState extends ConsumerState<_WifiToggleRow> {
+  bool _isToggling = false;
+
+  Future<void> _toggle(bool value) async {
+    if (_isToggling) return;
+    setState(() => _isToggling = true);
+
+    final appState = ref.read(appStateProvider);
+    final success = await appState.setWirelessInterfaceEnabled(
+      widget.uciSection,
+      value,
+      context: context,
+    );
+
+    if (mounted) {
+      setState(() => _isToggling = false);
+      if (!success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(context.l10n.failedToToggleInterface),
+            backgroundColor: Theme.of(context).colorScheme.error,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            widget.isEnabled ? Icons.wifi : Icons.wifi_off,
+            size: 20,
+            color: widget.isEnabled
+                ? colorScheme.primary
+                : colorScheme.onSurfaceVariant,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              widget.isEnabled
+                  ? context.l10n.interfaceEnabled
+                  : context.l10n.interfaceDisabled,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          if (_isToggling)
+            const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          else
+            Switch(value: widget.isEnabled, onChanged: _toggle),
+        ],
+      ),
+    );
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────
+// WiFi Edit Bottom Sheet
+// ──────────────────────────────────────────────────────────────────
+
+class _WifiEditBottomSheet extends ConsumerStatefulWidget {
+  final Map<String, dynamic> iface;
+
+  const _WifiEditBottomSheet({required this.iface});
+
+  @override
+  ConsumerState<_WifiEditBottomSheet> createState() =>
+      _WifiEditBottomSheetState();
+}
+
+class _WifiEditBottomSheetState extends ConsumerState<_WifiEditBottomSheet> {
+  late TextEditingController _ssidController;
+  late TextEditingController _passwordController;
+  late TextEditingController _networkController;
+  String? _selectedEncryption;
+  late String _originalEncryption; // tracks what was set before editing
+  bool _obscurePassword = true;
+  bool _isSaving = false;
+  String? _error;
+
+  static const _encryptionOptions = [
+    'none',
+    'owe',
+    'psk2',
+    'psk',
+    'psk-mixed',
+    'sae',
+    'sae-mixed',
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _ssidController = TextEditingController(
+      text: widget.iface['ssid']?.toString() ?? '',
+    );
+    _passwordController = TextEditingController();
+    _networkController = TextEditingController(
+      text: widget.iface['network']?.toString() ?? 'lan',
+    );
+
+    final rawEncryption = widget.iface['encryption']?.toString().trim() ?? '';
+    final currentEnc = (rawEncryption.isEmpty ? 'none' : rawEncryption)
+        .split('+')
+        .first;
+    _originalEncryption = currentEnc;
+    _selectedEncryption = _encryptionOptions.contains(currentEnc)
+        ? currentEnc
+        : null;
+  }
+
+  @override
+  void dispose() {
+    _ssidController.dispose();
+    _passwordController.dispose();
+    _networkController.dispose();
+    super.dispose();
+  }
+
+  bool get _requiresPassword =>
+      _selectedEncryption != null &&
+      _selectedEncryption != 'none' &&
+      _selectedEncryption != 'owe';
+
+  bool get _isEncryptionSupported =>
+      _selectedEncryption != null &&
+      _encryptionOptions.contains(_selectedEncryption);
+
+  String _encryptionLabel(String value) => switch (value) {
+    'none' => context.l10n.encryptionNone,
+    'owe' => 'OWE',
+    'psk2' => 'WPA2-PSK',
+    'psk' => 'WPA-PSK',
+    'psk-mixed' => 'WPA/WPA2 Mixed PSK',
+    'sae' => 'WPA3-SAE',
+    'sae-mixed' => 'WPA2/WPA3 Mixed',
+    _ => value,
+  };
+
+  /// True when switching from an open interface to a password-protected one.
+  bool get _changingToEncrypted =>
+      (_originalEncryption == 'none' || _originalEncryption == 'owe') &&
+      _requiresPassword;
+
+  Future<void> _save() async {
+    final ssid = _ssidController.text.trim();
+    if (ssid.isEmpty) {
+      setState(() => _error = context.l10n.ssidEmptyError);
+      return;
+    }
+
+    // Block unsupported encryption modes (e.g. enterprise WPA-EAP)
+    if (!_isEncryptionSupported) {
+      setState(() => _error = context.l10n.unsupportedEncryptionError);
+      return;
+    }
+
+    // Require a password when changing an open interface to an encrypted one
+    if (_changingToEncrypted && _passwordController.text.isEmpty) {
+      setState(() => _error = context.l10n.encryptionPasswordRequiredError);
+      return;
+    }
+
+    if (_requiresPassword &&
+        _passwordController.text.isNotEmpty &&
+        _passwordController.text.length < 8) {
+      setState(() => _error = context.l10n.passwordLengthError);
+      return;
+    }
+
+    setState(() {
+      _isSaving = true;
+      _error = null;
+    });
+
+    final uciSection = widget.iface['uciSection'] as String? ?? '';
+    if (uciSection.isEmpty) {
+      setState(() {
+        _isSaving = false;
+        _error = context.l10n.uciSectionMissingError;
+      });
+      return;
+    }
+
+    // Build values to update
+    final values = <String, String>{
+      'ssid': ssid,
+      'encryption': _selectedEncryption!,
+    };
+
+    if (!_requiresPassword) {
+      values['key'] = '';
+    } else if (_passwordController.text.isNotEmpty) {
+      values['key'] = _passwordController.text;
+    }
+
+    // Update network binding
+    final network = _networkController.text.trim();
+    if (network.isNotEmpty) {
+      values['network'] = network;
+    }
+
+    final appState = ref.read(appStateProvider);
+    final success = await appState.modifyWirelessInterface(
+      uciSection,
+      values,
+      context: context,
+    );
+
+    if (!mounted) return;
+
+    if (success) {
+      final messenger = ScaffoldMessenger.of(context);
+      Navigator.of(context).pop();
+      messenger.showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.check_circle, color: Colors.white, size: 20),
+              const SizedBox(width: 8),
+              Text(context.l10n.wifiUpdated(ssid)),
+            ],
+          ),
+          backgroundColor: Colors.green.shade700,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    } else {
+      setState(() {
+        _isSaving = false;
+        _error = context.l10n.saveChangesFailed;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final mode = widget.iface['mode']?.toString() ?? 'ap';
+
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Drag handle
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              // Header
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: colorScheme.primaryContainer.withValues(
+                        alpha: 0.3,
+                      ),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.edit,
+                      color: colorScheme.primary,
+                      size: 24,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          context.l10n.editWirelessInterface,
+                          style: theme.textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        Text(
+                          '${widget.iface['radioName']} • ${context.l10n.modeValue(mode.toUpperCase())}',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 24),
+
+              // SSID field
+              _buildLabel(context, context.l10n.ssidNetworkName),
+              const SizedBox(height: 6),
+              TextField(
+                controller: _ssidController,
+                enabled: !_isSaving,
+                decoration: _inputDecoration(
+                  context,
+                  hintText: context.l10n.enterSsid,
+                  prefixIcon: Icons.wifi,
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              // Encryption selector
+              _buildLabel(context, context.l10n.encryption),
+              const SizedBox(height: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: colorScheme.outline.withValues(alpha: 0.3),
+                  ),
+                  color: colorScheme.surfaceContainerLow,
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: _selectedEncryption,
+                    isExpanded: true,
+                    icon: Icon(
+                      Icons.arrow_drop_down,
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                    items: _encryptionOptions.map((opt) {
+                      return DropdownMenuItem<String>(
+                        value: opt,
+                        child: Text(
+                          _encryptionLabel(opt),
+                          style: theme.textTheme.bodyMedium,
+                        ),
+                      );
+                    }).toList(),
+                    onChanged: _isSaving
+                        ? null
+                        : (value) {
+                            if (value != null) {
+                              setState(() => _selectedEncryption = value);
+                            }
+                          },
+                  ),
+                ),
+              ),
+
+              // Password field (only for encrypted networks)
+              if (_requiresPassword) ...[
+                const SizedBox(height: 16),
+                _buildLabel(
+                  context,
+                  _changingToEncrypted
+                      ? context.l10n.passwordRequired
+                      : context.l10n.passwordKeepCurrent,
+                ),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: _passwordController,
+                  obscureText: _obscurePassword,
+                  enabled: !_isSaving,
+                  decoration: _inputDecoration(
+                    context,
+                    hintText: context.l10n.enterNewPassword,
+                    prefixIcon: Icons.key,
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _obscurePassword
+                            ? Icons.visibility_off
+                            : Icons.visibility,
+                      ),
+                      onPressed: () {
+                        setState(() => _obscurePassword = !_obscurePassword);
+                      },
+                    ),
+                  ),
+                ),
+              ],
+
+              const SizedBox(height: 16),
+
+              // Network binding
+              _buildLabel(context, context.l10n.network),
+              const SizedBox(height: 6),
+              TextField(
+                controller: _networkController,
+                enabled: !_isSaving,
+                decoration: _inputDecoration(
+                  context,
+                  hintText: context.l10n.networkExample,
+                  prefixIcon: Icons.lan_outlined,
+                ),
+              ),
+
+              // Error
+              if (_error != null) ...[
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: colorScheme.errorContainer.withValues(alpha: 0.3),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.error_outline,
+                        color: colorScheme.error,
+                        size: 18,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _error!,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: colorScheme.error,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+
+              const SizedBox(height: 20),
+
+              // Warning
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: colorScheme.tertiaryContainer.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      Icons.info_outline,
+                      color: colorScheme.tertiary,
+                      size: 18,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        context.l10n.wifiChangesWarning,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurface.withValues(alpha: 0.7),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 20),
+
+              // Save button
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: _isSaving ? null : _save,
+                  icon: _isSaving
+                      ? SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: colorScheme.onPrimary,
+                          ),
+                        )
+                      : const Icon(Icons.save),
+                  label: Text(
+                    _isSaving
+                        ? context.l10n.applying
+                        : context.l10n.saveChanges,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLabel(BuildContext context, String text) {
+    return Text(
+      text,
+      style: Theme.of(
+        context,
+      ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+    );
+  }
+
+  InputDecoration _inputDecoration(
+    BuildContext context, {
+    required String hintText,
+    required IconData prefixIcon,
+    Widget? suffixIcon,
+  }) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return InputDecoration(
+      hintText: hintText,
+      prefixIcon: Icon(prefixIcon),
+      suffixIcon: suffixIcon,
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(
+          color: colorScheme.outline.withValues(alpha: 0.3),
+        ),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: colorScheme.primary, width: 2),
+      ),
+      filled: true,
+      fillColor: colorScheme.surfaceContainerLow,
+    );
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────
+// WiFi Delete Confirmation Dialog
+// ──────────────────────────────────────────────────────────────────
+
+class _WifiDeleteDialog extends ConsumerStatefulWidget {
+  final String ssid;
+  final String uciSection;
+  final String mode;
+
+  const _WifiDeleteDialog({
+    required this.ssid,
+    required this.uciSection,
+    required this.mode,
+  });
+
+  @override
+  ConsumerState<_WifiDeleteDialog> createState() => _WifiDeleteDialogState();
+}
+
+class _WifiDeleteDialogState extends ConsumerState<_WifiDeleteDialog> {
+  bool _isDeleting = false;
+
+  Future<void> _delete() async {
+    setState(() => _isDeleting = true);
+
+    final appState = ref.read(appStateProvider);
+    final success = await appState.deleteWirelessInterface(
+      widget.uciSection,
+      context: context,
+    );
+
+    if (!mounted) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    final errorColor = Theme.of(context).colorScheme.error;
+    Navigator.of(context).pop();
+
+    if (success) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.check_circle, color: Colors.white, size: 20),
+              const SizedBox(width: 8),
+              Text(context.l10n.interfaceRemoved(widget.ssid)),
+            ],
+          ),
+          backgroundColor: Colors.green.shade700,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    } else {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(context.l10n.removeInterfaceFailed),
+          backgroundColor: errorColor,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final displayName = widget.ssid.isNotEmpty
+        ? widget.ssid
+        : widget.uciSection;
+    final modeLower = widget.mode.toLowerCase();
+    final isStaMode =
+        modeLower.contains('sta') ||
+        modeLower.contains('client') ||
+        modeLower == 'station';
+    final warningMessage = isStaMode
+        ? context.l10n.removeStaWarning
+        : context.l10n.removeApWarning;
+
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      icon: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: colorScheme.errorContainer.withValues(alpha: 0.3),
+          shape: BoxShape.circle,
+        ),
+        child: Icon(Icons.delete_forever, color: colorScheme.error, size: 32),
+      ),
+      title: Text(context.l10n.removeWirelessInterfaceQuestion),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            context.l10n.removeWirelessInterfaceDescription(displayName),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: colorScheme.errorContainer.withValues(alpha: 0.2),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.warning_amber, color: colorScheme.error, size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    warningMessage,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: colorScheme.error,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: _isDeleting ? null : () => Navigator.of(context).pop(),
+          child: Text(context.l10n.cancel),
+        ),
+        FilledButton(
+          onPressed: _isDeleting ? null : _delete,
+          style: FilledButton.styleFrom(
+            backgroundColor: colorScheme.error,
+            foregroundColor: colorScheme.onError,
+          ),
+          child: _isDeleting
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+              : Text(context.l10n.remove),
+        ),
+      ],
+    );
   }
 }

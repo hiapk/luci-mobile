@@ -13,6 +13,7 @@ import 'package:url_launcher/url_launcher_string.dart';
 import 'package:luci_mobile/config/app_config.dart';
 import 'package:luci_mobile/screens/manage_routers_screen.dart';
 import 'package:luci_mobile/screens/router_tools_screen.dart';
+import 'package:luci_mobile/screens/wifi_scan_screen.dart';
 import 'package:luci_mobile/utils/http_client_manager.dart';
 import 'package:luci_mobile/state/app_state.dart';
 
@@ -124,7 +125,7 @@ class _MoreScreenState extends ConsumerState<MoreScreen> {
             TextButton(
               child: const Text('退出'),
               onPressed: () async {
-                appState.logout();
+                await appState.logout();
                 // Clear all accepted certificates on logout
                 await HttpClientManager().clearAcceptedCertificates();
                 if (context.mounted) {
@@ -303,8 +304,29 @@ class _MoreScreenState extends ConsumerState<MoreScreen> {
                 final isRebooting = ref.watch(
                   appStateProvider.select((state) => state.isRebooting),
                 );
+                final canReboot = ref.watch(
+                  appStateProvider.select((state) => state.canReboot),
+                );
+                final accessError = ref.watch(
+                  appStateProvider.select((state) => state.rebootAccessError),
+                );
+                final rebootEnabled = canReboot == true && !isRebooting;
                 return _MoreScreenSection(
                   tiles: [
+                    _buildMoreTile(
+                      context,
+                      icon: Icons.wifi_find,
+                      iconColor: Theme.of(context).colorScheme.primary,
+                      title: 'Wi-Fi 扫描器',
+                      subtitle: '扫描并连接附近的无线网络',
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => const WifiScanScreen(),
+                          ),
+                        );
+                      },
+                    ),
                     _buildMoreTile(
                       context,
                       icon: Icons.build_outlined,
@@ -321,14 +343,24 @@ class _MoreScreenState extends ConsumerState<MoreScreen> {
                     ),
                     _buildMoreTile(
                       context,
-                      icon: Icons.restart_alt,
+                      icon: accessError != null
+                          ? Icons.error_outline
+                          : canReboot == false
+                          ? Icons.lock_outline
+                          : Icons.restart_alt,
                       iconColor: Theme.of(context).colorScheme.primary,
                       title: '重启路由器',
-                      subtitle: '重新启动路由器系统',
-                      onTap: isRebooting
-                          ? null
-                          : () => _showRebootDialog(context),
-                      enabled: !isRebooting,
+                      subtitle:
+                          accessError ??
+                          switch (canReboot) {
+                            false => '需要管理员权限',
+                            null => '正在检查管理员权限…',
+                            true => '重新启动路由器系统',
+                          },
+                      onTap: rebootEnabled
+                          ? () => _showRebootDialog(context)
+                          : null,
+                      enabled: rebootEnabled,
                       showSpinner: isRebooting,
                     ),
                   ],

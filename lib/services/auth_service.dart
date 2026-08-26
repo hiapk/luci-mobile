@@ -219,6 +219,68 @@ class RealAuthService implements IAuthService {
   }
 
   @override
+  Future<FallbackLoginResult> loginWithFallback({
+    required String activeAddress,
+    required bool activeHttps,
+    required int activeIndex,
+    String? fallbackAddress,
+    bool? fallbackHttps,
+    required String username,
+    required String password,
+    String? otp,
+    String? totpSecret,
+    BuildContext? context,
+  }) async {
+    String? normalizedSecret;
+    var effectiveOtp = otp;
+    if (totpSecret != null && totpSecret.trim().isNotEmpty) {
+      normalizedSecret = _totpService.normalizeSecret(totpSecret);
+      effectiveOtp = await _totpService.generateForLogin(normalizedSecret);
+    }
+    final allowStoredTotp = effectiveOtp == null || effectiveOtp.trim().isEmpty;
+
+    Future<bool> tryAddress(String address, bool useHttps) async {
+      if (effectiveOtp == null && normalizedSecret == null) {
+        final savedSession = await _restoreSavedSession(address, useHttps);
+        if (savedSession == _SavedSessionResult.valid) return true;
+        if (savedSession == _SavedSessionResult.unavailable) return false;
+      }
+      return _login(
+        address,
+        username,
+        password,
+        useHttps,
+        otp: effectiveOtp,
+        totpSecretToSave: normalizedSecret,
+        allowStoredTotp: allowStoredTotp,
+        context: context?.mounted == true ? context : null,
+      );
+    }
+
+    // Try the active address first, including any restorable LuCI session.
+    final activeOk = await tryAddress(activeAddress, activeHttps);
+    if (activeOk) {
+      return FallbackLoginResult(success: true, usedAddressIndex: activeIndex);
+    }
+
+    // Try the fallback address if available
+    if (fallbackAddress != null &&
+        fallbackAddress.isNotEmpty &&
+        fallbackHttps != null) {
+      final fallbackIndex = activeIndex == 0 ? 1 : 0;
+      final fallbackOk = await tryAddress(fallbackAddress, fallbackHttps);
+      if (fallbackOk) {
+        return FallbackLoginResult(
+          success: true,
+          usedAddressIndex: fallbackIndex,
+        );
+      }
+    }
+
+    return FallbackLoginResult(success: false, usedAddressIndex: activeIndex);
+  }
+
+  @override
   Future<bool> tryAutoLogin(
     String? ipAddress,
     String? username,

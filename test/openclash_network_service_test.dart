@@ -51,9 +51,7 @@ void main() {
 
   test('reports an IP.SB timeout instead of hiding the failure', () async {
     final service = OpenClashNetworkService(
-      ipInfoClient: MockClient(
-        (_) => Completer<http.Response>().future,
-      ),
+      ipInfoClient: MockClient((_) => Completer<http.Response>().future),
       ipInfoTimeout: const Duration(milliseconds: 20),
     );
 

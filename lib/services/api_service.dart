@@ -16,21 +16,133 @@ class LoginResult {
 
   const LoginResult({
     required this.token,
-    required this.cookieName,
+    this.cookieName,
     required this.actualUseHttps,
-    required this.status,
+    this.status = LuciLoginStatus.rejected,
   });
 
   bool get requiresOtp => status == LuciLoginStatus.otpRequired;
 }
 
+class RpcException implements Exception {
+  final int? status;
+  final String object;
+  final String method;
+  final String? detail;
+
+  const RpcException({
+    required this.object,
+    required this.method,
+    this.status,
+    this.detail,
+  });
+
+  @override
+  String toString() {
+    final call = '$object.$method';
+    final unavailable =
+        status == 3 ||
+        status == 4 ||
+        status == 8 ||
+        detail?.toLowerCase().contains('not found') == true ||
+        detail?.toLowerCase().contains('not supported') == true;
+    if (unavailable && object == 'luci-rpc') {
+      return 'Router RPC support is missing: $call is unavailable. Install '
+          'rpcd-mod-luci, restart rpcd, then reconnect.';
+    }
+    if (unavailable && object == 'iwinfo') {
+      return 'Wireless client support is missing: $call is unavailable. '
+          'Install rpcd-mod-iwinfo, restart rpcd, then refresh.';
+    }
+    if (status == 6 ||
+        detail?.toLowerCase().contains('access denied') == true) {
+      return 'This account does not have permission for $call. Sign in with '
+          'an administrator account or grant the required RPC access.';
+    }
+
+    final reason = switch (status) {
+      1 => 'invalid command',
+      2 => 'invalid argument',
+      3 => 'method not found',
+      4 => 'object not found',
+      5 => 'no data',
+      7 => 'timed out',
+      8 => 'not supported',
+      9 => 'unknown error',
+      10 => 'connection failed',
+      _ => detail ?? 'unknown error',
+    };
+    return 'Router RPC call $call failed: ${detail ?? reason}.';
+  }
+}
+
+/// Validates the ubus `[status, data]` envelope while preserving it for
+/// existing callers.
+dynamic validateRpcResult(
+  dynamic result, {
+  required String object,
+  required String method,
+}) {
+  if (result is! List ||
+      result.isEmpty ||
+      result.length > 2 ||
+      result.first is! int) {
+    throw RpcException(
+      object: object,
+      method: method,
+      detail: 'invalid response',
+    );
+  }
+
+  final status = result.first as int;
+  if (status != 0) {
+    throw RpcException(
+      object: object,
+      method: method,
+      status: status,
+      detail: result.length > 1 ? result[1]?.toString() : null,
+    );
+  }
+  return result;
+}
+
+bool? rpcAccessAllowed(dynamic result) {
+  if (result is List &&
+      result.length == 2 &&
+      result[0] is int &&
+      result[0] == 0) {
+    final data = result[1];
+    if (data is Map && data['access'] is bool) return data['access'] as bool;
+  }
+  return null;
+}
+
+String userFacingApiError(Object error) {
+  if (error is RpcException) return error.toString();
+  if (error is DioException) {
+    final status = error.response?.statusCode;
+    if (status == 401 || status == 403) {
+      return 'The router rejected this session. Reconnect and check the '
+          'account\'s RPC permissions.';
+    }
+    if (status != null) return 'The router returned HTTP $status.';
+    return 'Could not connect to the router. Check its address and your '
+        'network connection, then try again.';
+  }
+  return error.toString().replaceFirst('Exception: ', '');
+}
+
 Uri _buildUrl(String ipAddress, bool useHttps, String path) {
   final scheme = useHttps ? 'https' : 'http';
-  // Handle cases where ipAddress might already include a port
+  // Handle cases where ipAddress might already include a scheme
   String host = ipAddress;
-  // Don't add scheme if the address already has one (shouldn't happen with our parser)
   if (host.startsWith('http://') || host.startsWith('https://')) {
     return Uri.parse('$host$path');
+  }
+  // Bracket bare IPv6 literals (2+ colons) - string interpolation into
+  // Uri.parse produces an invalid authority otherwise.
+  if (!host.startsWith('[') && ':'.allMatches(host).length > 1) {
+    host = '[$host]';
   }
   return Uri.parse('$scheme://$host$path');
 }
@@ -64,6 +176,12 @@ class RealApiService implements IApiService {
 
   void forgetSession(String ipAddress, bool useHttps) {
     _sessions.remove(_routerKey(ipAddress, useHttps));
+  }
+
+  List<dynamic> _requireRpcSuccess(dynamic result, String operation) {
+    if (result is List && result.isNotEmpty && result[0] == 0) return result;
+    final detail = result is List && result.length > 1 ? result[1] : result;
+    throw Exception('$operation failed: $detail');
   }
 
   Dio _createHttpClient(
@@ -190,6 +308,50 @@ class RealApiService implements IApiService {
     );
   }
 
+  /// POSTs the login form. Returns the raw response so callers can inspect
+  /// redirect targets; any status accepted by [Options.validateStatus]
+  /// (2xx-3xx) may carry the session cookie.
+  Future<Response<dynamic>> _sendLogin(
+    Dio client,
+    Uri uri,
+    Map<String, String> params,
+  ) {
+    return client.post(
+      uri.toString(),
+      data: params,
+      options: Options(
+        contentType: Headers.formUrlEncodedContentType,
+        followRedirects: true,
+        validateStatus: (code) =>
+            code != null && ((code >= 200 && code < 400) || code == 403),
+      ),
+    );
+  }
+
+  /// POSTs the login form and extracts the session token from the
+  /// `sysauth` cookie, if present.
+  Future<String?> _postLogin(
+    Dio client,
+    Uri uri,
+    Map<String, String> params,
+  ) async {
+    final response = await _sendLogin(client, uri, params);
+    final cookie = LuciAuthProtocol.parseAuthCookie(
+      response.headers.map['set-cookie'],
+    );
+    if (cookie != null) {
+      _lastCookieName = cookie.name;
+      _lastLoginStatus = LuciLoginStatus.success;
+      return cookie.value;
+    }
+    _lastLoginStatus = LuciAuthProtocol.classifyLoginResponse(
+      statusCode: response.statusCode ?? 0,
+      headers: response.headers.map,
+      body: response.data?.toString() ?? '',
+    );
+    return null;
+  }
+
   Future<String?> _login(
     String ipAddress,
     String username,
@@ -209,47 +371,33 @@ class RealApiService implements IApiService {
 
     try {
       // Normal POST request - Dio will follow redirects by default
-      final response = await client.post(
-        uri.toString(),
-        data: params,
-        options: Options(
-          contentType: Headers.formUrlEncodedContentType,
-          followRedirects: true,
-          validateStatus: (code) =>
-              code != null && ((code >= 200 && code < 400) || code == 403),
-        ),
-      );
+      final response = await _sendLogin(client, uri, params);
 
       // Check if we were redirected to HTTPS (only relevant for initial HTTP attempts)
       if (checkRedirect && !useHttps) {
         final finalUrl = response.realUri;
         if (finalUrl.scheme == 'https') {
           Logger.info('Detected HTTP to HTTPS redirect: $uri -> $finalUrl');
-          // If we got a successful login after redirect, extract the token
-          if (response.statusCode == 302 || response.statusCode == 200) {
-            final cookie = LuciAuthProtocol.parseAuthCookie(
-              response.headers.map['set-cookie'],
-            );
-            if (cookie != null) {
-              _lastCookieName = cookie.name;
-              return 'HTTPS_REDIRECT:${cookie.value}';
-            }
+          final cookie = LuciAuthProtocol.parseAuthCookie(
+            response.headers.map['set-cookie'],
+          );
+          if (cookie != null) {
+            _lastCookieName = cookie.name;
+            _lastLoginStatus = LuciLoginStatus.success;
+            return 'HTTPS_REDIRECT:${cookie.value}';
           }
           // No token found, trigger HTTPS retry
           return null;
         }
       }
 
-      if (response.statusCode == 302 || response.statusCode == 200) {
-        // Parse Set-Cookie headers to find sysauth cookie
-        final cookie = LuciAuthProtocol.parseAuthCookie(
-          response.headers.map['set-cookie'],
-        );
-        if (cookie != null) {
-          _lastCookieName = cookie.name;
-          _lastLoginStatus = LuciLoginStatus.success;
-          return cookie.value;
-        }
+      final cookie = LuciAuthProtocol.parseAuthCookie(
+        response.headers.map['set-cookie'],
+      );
+      if (cookie != null) {
+        _lastCookieName = cookie.name;
+        _lastLoginStatus = LuciLoginStatus.success;
+        return cookie.value;
       }
       _lastLoginStatus = LuciAuthProtocol.classifyLoginResponse(
         statusCode: response.statusCode ?? 0,
@@ -307,34 +455,7 @@ class RealApiService implements IApiService {
             context: context,
           );
           try {
-            final retryResponse = await retryClient.post(
-              uri.toString(),
-              data: params,
-              options: Options(
-                contentType: Headers.formUrlEncodedContentType,
-                followRedirects: true,
-                validateStatus: (code) =>
-                    code != null &&
-                    ((code >= 200 && code < 400) || code == 403),
-              ),
-            );
-
-            if (retryResponse.statusCode == 302 ||
-                retryResponse.statusCode == 200) {
-              final cookie = LuciAuthProtocol.parseAuthCookie(
-                retryResponse.headers.map['set-cookie'],
-              );
-              if (cookie != null) {
-                _lastCookieName = cookie.name;
-                _lastLoginStatus = LuciLoginStatus.success;
-                return cookie.value;
-              }
-            }
-            _lastLoginStatus = LuciAuthProtocol.classifyLoginResponse(
-              statusCode: retryResponse.statusCode ?? 0,
-              headers: retryResponse.headers.map,
-              body: retryResponse.data?.toString() ?? '',
-            );
+            return await _postLogin(retryClient, uri, params);
           } on DioException catch (retryError, retryStack) {
             Logger.exception('Login retry failed', retryError, retryStack);
           }
@@ -440,6 +561,28 @@ class RealApiService implements IApiService {
     required String method,
     Map<String, dynamic>? params,
     BuildContext? context,
+  }) {
+    return _callWithTransport(
+      ipAddress,
+      sysauth,
+      useHttps,
+      object: object,
+      method: method,
+      params: params,
+      context: context,
+    );
+  }
+
+  Future<dynamic> _callWithTransport(
+    String ipAddress,
+    String sysauth,
+    bool useHttps, {
+    required String object,
+    required String method,
+    Map<String, dynamic>? params,
+    BuildContext? context,
+    Duration? receiveTimeout,
+    CancelToken? cancelToken,
   }) async {
     final client = _createHttpClient(useHttps, ipAddress, context: context);
     final routerKey = _routerKey(ipAddress, useHttps);
@@ -461,8 +604,10 @@ class RealApiService implements IApiService {
       return client.post(
         url.toString(),
         data: jsonEncode(request.body),
+        cancelToken: cancelToken,
         options: Options(
           headers: request.headers,
+          receiveTimeout: receiveTimeout,
           validateStatus: (code) => code == 200 || code == 403 || code == 404,
         ),
       );
@@ -475,21 +620,26 @@ class RealApiService implements IApiService {
         final decoded = response.data is String
             ? jsonDecode(response.data as String)
             : response.data;
-        if (decoded is! Map<String, dynamic>) {
-          throw const FormatException('RPC 返回了无效的 JSON 数据');
+        if (decoded is! Map) {
+          throw RpcException(
+            object: object,
+            method: method,
+            detail: 'invalid response',
+          );
         }
         if (decoded['error'] != null) {
-          throw Exception('RPC error: ${decoded['error']['message']}');
+          final error = decoded['error'];
+          throw RpcException(
+            object: object,
+            method: method,
+            detail: error is Map ? error['message']?.toString() : '$error',
+          );
         }
-        // Return in LuCI RPC format: [status, data]
-        final result = decoded['result'];
-        if (result is List && result.isNotEmpty) {
-          // Result is already in [status, data] format
-          return result;
-        } else {
-          // Wrap single result in format: [0, data]
-          return [0, result];
-        }
+        return validateRpcResult(
+          decoded['result'],
+          object: object,
+          method: method,
+        );
       } else if (response.statusCode == 403) {
         throw const LuciSessionExpiredException();
       } else {
@@ -562,6 +712,11 @@ class RealApiService implements IApiService {
     required bool useHttps,
     BuildContext? context,
   }) async {
+    const invalidResponse = RpcException(
+      object: 'luci-rpc',
+      method: 'getWirelessDevices',
+      detail: 'invalid response',
+    );
     try {
       // First, get wireless device information to find all wireless interfaces
       final wirelessResult = await callWithContext(
@@ -577,11 +732,19 @@ class RealApiService implements IApiService {
           wirelessResult.length > 1 &&
           wirelessResult[0] == 0) {
         final wirelessData = wirelessResult[1];
+        if (wirelessData is! Map) throw invalidResponse;
+        for (final radioData in wirelessData.values) {
+          if (radioData is! Map) throw invalidResponse;
+        }
         final interfaces = WirelessInterfacePolicy.apInterfaceNames(
           wirelessData,
         );
-        final entries = await Future.wait(
-          interfaces.map((ifname) async {
+        final result = <String, Set<String>>{};
+        Object? firstError;
+        StackTrace? firstStack;
+        var succeeded = 0;
+        for (final ifname in interfaces) {
+          try {
             final stations = await fetchAssociatedStationsWithContext(
               ipAddress: ipAddress,
               sysauth: sysauth,
@@ -589,17 +752,22 @@ class RealApiService implements IApiService {
               interface: ifname,
               context: context?.mounted == true ? context : null,
             );
-            return MapEntry(ifname, stations.toSet());
-          }),
-        );
-        return Map.fromEntries(
-          entries.where((entry) => entry.value.isNotEmpty),
-        );
+            succeeded++;
+            if (stations.isNotEmpty) result[ifname] = stations.toSet();
+          } catch (error, stack) {
+            firstError ??= error;
+            firstStack ??= stack;
+          }
+        }
+        if (interfaces.isNotEmpty && succeeded == 0 && firstError != null) {
+          Error.throwWithStackTrace(firstError, firstStack!);
+        }
+        return result;
       }
-      return {};
+      throw invalidResponse;
     } catch (e, stack) {
       Logger.exception('Failed to fetch all associated stations', e, stack);
-      return {};
+      rethrow;
     }
   }
 
@@ -612,6 +780,11 @@ class RealApiService implements IApiService {
     required String interface,
     BuildContext? context,
   }) async {
+    const invalidResponse = RpcException(
+      object: 'iwinfo',
+      method: 'assoclist',
+      detail: 'invalid response',
+    );
     try {
       final result = await callWithContext(
         ipAddress,
@@ -627,19 +800,19 @@ class RealApiService implements IApiService {
         final data = result[1];
         if (data is Map && data['results'] is List) {
           final resultsList = data['results'] as List;
-          return resultsList
-              .map(
-                (entry) => (entry as Map<String, dynamic>)['mac']?.toString(),
-              )
-              .where((mac) => mac != null)
-              .cast<String>()
-              .toList();
+          final macs = <String>[];
+          for (final entry in resultsList) {
+            if (entry is! Map<String, dynamic>) throw invalidResponse;
+            final mac = entry['mac'];
+            if (mac != null) macs.add(mac.toString());
+          }
+          return macs;
         }
       }
-      return [];
+      throw invalidResponse;
     } catch (e, stack) {
       Logger.exception('Failed to fetch associated stations', e, stack);
-      return [];
+      rethrow;
     }
   }
 
@@ -766,14 +939,17 @@ class RealApiService implements IApiService {
     required Map<String, String> values,
     BuildContext? context,
   }) async {
-    return await callWithContext(
-      ipAddress,
-      sysauth,
-      useHttps,
-      object: 'uci',
-      method: 'set',
-      params: {'config': config, 'section': section, 'values': values},
-      context: context,
+    return _requireRpcSuccess(
+      await callWithContext(
+        ipAddress,
+        sysauth,
+        useHttps,
+        object: 'uci',
+        method: 'set',
+        params: {'config': config, 'section': section, 'values': values},
+        context: context,
+      ),
+      'uci.set',
     );
   }
 
@@ -785,33 +961,227 @@ class RealApiService implements IApiService {
     required String config,
     BuildContext? context,
   }) async {
-    return await callWithContext(
-      ipAddress,
-      sysauth,
-      useHttps,
-      object: 'uci',
-      method: 'commit',
-      params: {'config': config},
-      context: context,
+    return _requireRpcSuccess(
+      await callWithContext(
+        ipAddress,
+        sysauth,
+        useHttps,
+        object: 'uci',
+        method: 'commit',
+        params: {'config': config},
+        context: context,
+      ),
+      'uci.commit',
     );
   }
 
+  /// Executes a command on the router via the rpcd `file.exec` ubus method.
+  ///
+  /// Note: rpcd's `system` object has no `exec` method - command execution
+  /// lives in the `file` object (rpcd-mod-file), which LuCI admin sessions
+  /// are ACL-granted to use.
   @override
   Future<dynamic> systemExec(
     String ipAddress,
     String sysauth,
     bool useHttps, {
     required String command,
+    List<String> params = const [],
     BuildContext? context,
   }) async {
-    return await callWithContext(
-      ipAddress,
-      sysauth,
-      useHttps,
-      object: 'system',
-      method: 'exec',
-      params: {'command': command},
-      context: context,
+    final result = _requireRpcSuccess(
+      await callWithContext(
+        ipAddress,
+        sysauth,
+        useHttps,
+        object: 'file',
+        method: 'exec',
+        params: {'command': command, 'params': params},
+        context: context,
+      ),
+      'file.exec',
+    );
+    final data = result.length > 1 ? result[1] : null;
+    if (data is Map && data['code'] is num && data['code'] != 0) {
+      throw Exception(
+        'file.exec failed: ${data['stderr'] ?? 'exit ${data['code']}'}',
+      );
+    }
+    return result;
+  }
+
+  CancelToken? _scanCancelToken;
+
+  @override
+  void cancelScan() {
+    _scanCancelToken?.cancel('Scan cancelled by user');
+    _scanCancelToken = null;
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> scanWirelessNetworks({
+    required String ipAddress,
+    required String sysauth,
+    required bool useHttps,
+    required String device,
+    BuildContext? context,
+  }) async {
+    cancelScan();
+    final scanToken = CancelToken();
+    _scanCancelToken = scanToken;
+
+    Logger.info('WiFi scan starting on device: $device');
+
+    try {
+      final result = await _callWithTransport(
+        ipAddress,
+        sysauth,
+        useHttps,
+        object: 'iwinfo',
+        method: 'scan',
+        params: {'device': device},
+        context: context,
+        receiveTimeout: const Duration(seconds: 120),
+        cancelToken: scanToken,
+      );
+
+      Logger.info('WiFi scan raw result type: ${result.runtimeType}');
+
+      if (result is List) {
+        final statusCode = result.isNotEmpty ? result[0] : null;
+        if (statusCode != null && statusCode != 0) {
+          const ubusErrors = {
+            1: 'Invalid command',
+            2: 'Invalid argument',
+            3: 'Method not found',
+            4: 'Not found',
+            5: 'No data',
+            6: 'Permission denied',
+            7: 'Request timed out',
+          };
+          final errMsg = ubusErrors[statusCode] ?? 'Unknown error';
+          throw Exception(
+            'iwinfo scan failed: $errMsg (code $statusCode) on device "$device"',
+          );
+        }
+
+        if (result.length < 2 || result[1] == null) return [];
+
+        final data = result[1];
+        if (data is Map) {
+          if (data['results'] is List) {
+            return (data['results'] as List)
+                .whereType<Map<String, dynamic>>()
+                .toList();
+          }
+          for (final value in data.values) {
+            if (value is List && value.isNotEmpty && value.first is Map) {
+              return value.whereType<Map<String, dynamic>>().toList();
+            }
+          }
+          Logger.warning(
+            'WiFi scan: response is Map but no results. Keys: ${data.keys.toList()}',
+          );
+          return [];
+        }
+
+        if (data is List) {
+          return data.whereType<Map<String, dynamic>>().toList();
+        }
+
+        Logger.warning('WiFi scan: unexpected data type: ${data.runtimeType}');
+        return [];
+      }
+
+      Logger.warning('WiFi scan: result is not List: ${result.runtimeType}');
+      return [];
+    } on DioException catch (e) {
+      if (e.type == DioExceptionType.cancel) return [];
+      if (e.type == DioExceptionType.receiveTimeout) {
+        throw Exception('Scan timed out on "$device". The radio may be busy.');
+      }
+      Logger.exception('WiFi scan DioException', e, e.stackTrace);
+      rethrow;
+    } finally {
+      if (identical(_scanCancelToken, scanToken)) {
+        _scanCancelToken = null;
+      }
+    }
+  }
+
+  @override
+  Future<dynamic> uciAdd(
+    String ipAddress,
+    String sysauth,
+    bool useHttps, {
+    required String config,
+    required String type,
+    required Map<String, dynamic> values,
+    String? name,
+    BuildContext? context,
+  }) async {
+    return _requireRpcSuccess(
+      await callWithContext(
+        ipAddress,
+        sysauth,
+        useHttps,
+        object: 'uci',
+        method: 'add',
+        params: {
+          'config': config,
+          'type': type,
+          'values': values,
+          'name': ?name,
+        },
+        context: context,
+      ),
+      'uci.add',
+    );
+  }
+
+  @override
+  Future<dynamic> uciDelete(
+    String ipAddress,
+    String sysauth,
+    bool useHttps, {
+    required String config,
+    required String section,
+    String? option,
+    BuildContext? context,
+  }) async {
+    return _requireRpcSuccess(
+      await callWithContext(
+        ipAddress,
+        sysauth,
+        useHttps,
+        object: 'uci',
+        method: 'delete',
+        params: {'config': config, 'section': section, 'option': ?option},
+        context: context,
+      ),
+      'uci.delete',
+    );
+  }
+
+  @override
+  Future<dynamic> uciGetAll(
+    String ipAddress,
+    String sysauth,
+    bool useHttps, {
+    required String config,
+    BuildContext? context,
+  }) async {
+    return _requireRpcSuccess(
+      await callWithContext(
+        ipAddress,
+        sysauth,
+        useHttps,
+        object: 'uci',
+        method: 'get',
+        params: {'config': config},
+        context: context,
+      ),
+      'uci.get',
     );
   }
 }

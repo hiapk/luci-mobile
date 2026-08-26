@@ -9,6 +9,7 @@ import 'package:luci_mobile/config/app_config.dart';
 import 'package:luci_mobile/services/secure_storage_service.dart';
 import 'package:luci_mobile/services/totp_service.dart';
 import 'package:luci_mobile/utils/url_parser.dart';
+import 'package:luci_mobile/l10n/luci_localizations.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -23,6 +24,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   final _ipController = TextEditingController();
   final _usernameController = TextEditingController(text: 'root');
   final _passwordController = TextEditingController();
+  final _alternateController = TextEditingController();
   final _otpController = TextEditingController();
   final _totpSecretController = TextEditingController();
   final _confirmationController = TextEditingController();
@@ -30,9 +32,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   bool _passwordVisible = false;
   bool _totpSecretVisible = false;
   bool _enrollFaceIdTotp = false;
+  bool _showAlternateAddress = false;
   late AnimationController _logoAnimController;
   late AnimationController _progressAnimController;
   bool _isActivatingReviewerMode = false;
+  late final Future<PackageInfo> _packageInfoFuture =
+      PackageInfo.fromPlatform();
   @override
   void initState() {
     super.initState();
@@ -151,6 +156,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     _ipController.dispose();
     _usernameController.dispose();
     _passwordController.dispose();
+    _alternateController.dispose();
     _otpController.dispose();
     _totpSecretController.dispose();
     _confirmationController.dispose();
@@ -202,7 +208,22 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
         return;
       }
 
-      // Use the parsed values
+      // Parse alternate address if provided
+      String? alternateHost;
+      bool? alternateHttps;
+      final altInput = _alternateController.text.trim();
+      if (altInput.isNotEmpty) {
+        final parsedAlt = UrlParser.parse(altInput);
+        if (parsedAlt.isValid) {
+          if (parsedAlt.hostWithPort == parsedUrl.hostWithPort) {
+            appState.setError(context.l10n.fallbackMustDiffer);
+            return;
+          }
+          alternateHost = parsedAlt.hostWithPort;
+          alternateHttps = parsedAlt.useHttps;
+        }
+      }
+
       final success = await appState.login(
         parsedUrl.hostWithPort,
         user,
@@ -211,6 +232,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
         otp: otp,
         totpSecret: totpSecret,
         fromRouter: false,
+        alternateAddress: alternateHost,
+        alternateUseHttps: alternateHttps,
         context: context,
       );
 
@@ -467,6 +490,72 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                                               },
                                             ),
                                           ),
+                                          const SizedBox(height: 6),
+                                          if (!_showAlternateAddress)
+                                            Align(
+                                              alignment: Alignment.centerLeft,
+                                              child: TextButton.icon(
+                                                onPressed: () => setState(
+                                                  () => _showAlternateAddress =
+                                                      true,
+                                                ),
+                                                icon: const Icon(
+                                                  Icons.add,
+                                                  size: 18,
+                                                ),
+                                                label: Text(
+                                                  context
+                                                      .l10n
+                                                      .addFallbackAddress,
+                                                ),
+                                              ),
+                                            )
+                                          else ...[
+                                            TextFormField(
+                                              controller: _alternateController,
+                                              decoration: InputDecoration(
+                                                labelText: context
+                                                    .l10n
+                                                    .fallbackAddress,
+                                                border:
+                                                    const OutlineInputBorder(),
+                                                prefixIcon: const Icon(
+                                                  Icons.swap_horiz,
+                                                ),
+                                                helperText: context
+                                                    .l10n
+                                                    .fallbackCredentialsHelp,
+                                                helperMaxLines: 2,
+                                              ),
+                                              textInputAction:
+                                                  TextInputAction.next,
+                                              validator: (value) {
+                                                if (value == null ||
+                                                    value.isEmpty) {
+                                                  return null;
+                                                }
+                                                final parsed = UrlParser.parse(
+                                                  value,
+                                                );
+                                                if (!parsed.isValid) {
+                                                  return context
+                                                      .l10n
+                                                      .invalidAddressFormat;
+                                                }
+                                                final primary = UrlParser.parse(
+                                                  _ipController.text,
+                                                );
+                                                if (primary.isValid &&
+                                                    parsed.hostWithPort ==
+                                                        primary.hostWithPort) {
+                                                  return context
+                                                      .l10n
+                                                      .mustDifferFromPrimaryAddress;
+                                                }
+                                                return null;
+                                              },
+                                            ),
+                                          ],
                                           const SizedBox(height: 10),
                                           Tooltip(
                                             message: '输入路由器管理用户名',
@@ -808,7 +897,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                           ),
                         ),
                         FutureBuilder<PackageInfo>(
-                          future: PackageInfo.fromPlatform(),
+                          future: _packageInfoFuture,
                           builder: (context, snapshot) {
                             if (!snapshot.hasData) {
                               return const SizedBox.shrink();
@@ -817,7 +906,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                             return Padding(
                               padding: const EdgeInsets.only(bottom: 8.0),
                               child: Text(
-                                'Version ${info.version}',
+                                context.l10n.version(info.version),
                                 style: textTheme.bodySmall?.copyWith(
                                   color: colorScheme.onSurfaceVariant
                                       .withValues(alpha: 0.7),

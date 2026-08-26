@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_localizations/flutter_localizations.dart';
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 
 import 'package:luci_mobile/state/app_state.dart';
+import 'package:luci_mobile/l10n/app_localizations.dart';
+import 'package:luci_mobile/l10n/luci_localizations.dart';
 import 'package:luci_mobile/screens/login_screen.dart';
 import 'package:luci_mobile/screens/main_screen.dart';
 import 'package:luci_mobile/screens/settings_screen.dart';
@@ -25,14 +26,12 @@ class LuCIApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final appState = ref.watch(appStateProvider);
     return MaterialApp(
-      title: 'LuCI 路由助手',
-      locale: const Locale('zh', 'CN'),
-      supportedLocales: const [Locale('zh', 'CN')],
-      localizationsDelegates: const [
-        GlobalMaterialLocalizations.delegate,
-        GlobalWidgetsLocalizations.delegate,
-        GlobalCupertinoLocalizations.delegate,
-      ],
+      onGenerateTitle: (context) => AppLocalizations.of(context)!.appTitle,
+      // Keep this fork's Chinese-first behavior while using upstream's full
+      // localization delegates and generated resources.
+      locale: const Locale('zh'),
+      localizationsDelegates: luciLocalizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
         useMaterial3: true,

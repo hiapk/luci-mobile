@@ -614,7 +614,7 @@ class _HomeAssistantNativeScreenState
     final router = ref.read(appStateProvider).selectedRouter;
     if (router == null) return;
     final base = Uri.parse(
-      '${router.useHttps ? 'https' : 'http'}://${router.ipAddress}',
+      '${router.activeUseHttps ? 'https' : 'http'}://${router.activeAddress}',
     );
     await launchUrl(
       base.replace(scheme: 'http', port: port, path: '/', query: null),

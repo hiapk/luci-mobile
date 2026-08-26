@@ -5,7 +5,10 @@ import 'package:luci_mobile/state/app_state.dart';
 import 'package:luci_mobile/main.dart';
 import 'package:luci_mobile/widgets/luci_app_bar.dart';
 import 'package:luci_mobile/widgets/luci_animation_system.dart';
+import 'package:luci_mobile/models/glinet_data.dart';
 import 'package:luci_mobile/models/router.dart' as model;
+import 'package:luci_mobile/utils/wifi_utils.dart';
+import 'package:luci_mobile/l10n/luci_localizations.dart';
 
 class DashboardScreen extends ConsumerStatefulWidget {
   const DashboardScreen({super.key});
@@ -57,24 +60,36 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   }
 
   void _updateWirelessArrows() {
-    if (!_wirelessScrollController.hasClients) return;
+    if (!mounted || !_wirelessScrollController.hasClients) return;
     final max = _wirelessScrollController.position.maxScrollExtent;
     final min = _wirelessScrollController.position.minScrollExtent;
     final offset = _wirelessScrollController.offset;
+    final showLeft = offset > min + 2;
+    final showRight = offset < max - 2;
+    // Skip redundant rebuilds - scroll listeners fire on every pixel.
+    if (showLeft == _showWirelessLeftArrow &&
+        showRight == _showWirelessRightArrow) {
+      return;
+    }
     setState(() {
-      _showWirelessLeftArrow = offset > min + 2;
-      _showWirelessRightArrow = offset < max - 2;
+      _showWirelessLeftArrow = showLeft;
+      _showWirelessRightArrow = showRight;
     });
   }
 
   void _updateWanArrows() {
-    if (!_wanScrollController.hasClients) return;
+    if (!mounted || !_wanScrollController.hasClients) return;
     final max = _wanScrollController.position.maxScrollExtent;
     final min = _wanScrollController.position.minScrollExtent;
     final offset = _wanScrollController.offset;
+    final showLeft = offset > min + 2;
+    final showRight = offset < max - 2;
+    if (showLeft == _showWanLeftArrow && showRight == _showWanRightArrow) {
+      return;
+    }
     setState(() {
-      _showWanLeftArrow = offset > min + 2;
-      _showWanRightArrow = offset < max - 2;
+      _showWanLeftArrow = showLeft;
+      _showWanRightArrow = showRight;
     });
   }
 
@@ -99,10 +114,19 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     return parts.join(' ');
   }
 
-  String _formatCpuLoad(List<dynamic> load) {
+  String _formatCpuLoad(
+    List<dynamic> load, {
+    int? cores,
+    bool showRawLoad = false,
+  }) {
     if (load.isEmpty) return 'N/A';
-    // Use the first value as the main CPU load
-    final percent = ((load[0] / 65536) * 100).clamp(0, 100);
+    final loadAvg = load[0] / 65536;
+    if (cores != null && cores > 0) {
+      final percent = (loadAvg / cores * 100).clamp(0, 100).toInt();
+      return '$percent%';
+    }
+    if (showRawLoad) return loadAvg.toStringAsFixed(2);
+    final percent = (loadAvg * 100).clamp(0, 100);
     return '${percent.toStringAsFixed(0)}%';
   }
 
@@ -171,6 +195,14 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     }
   }
 
+  String _channelLabel(String channel) => switch (channel) {
+    'snapshot' => context.l10n.releaseSnapshot,
+    'beta' => context.l10n.releaseBeta,
+    'rc' => context.l10n.releaseCandidate,
+    'testing' => context.l10n.releaseTesting,
+    _ => context.l10n.releaseStable,
+  };
+
   Widget _buildDeviceInfoCard(AppState appState) {
     final boardInfo =
         appState.dashboardData?['boardInfo'] as Map<String, dynamic>?;
@@ -178,7 +210,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     final release = boardInfo?['release'] as Map<String, dynamic>?;
     final version = release?['version'] ?? 'N/A';
     final channel = _deriveReleaseChannel(release);
-    final channelLabel = channel.toUpperCase();
+    final channelLabel = _channelLabel(channel);
     final channelColors = _channelColors(channel);
 
     final labelStyle = Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -193,7 +225,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
       margin: EdgeInsets.zero,
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 8.0),
+        padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 8.0),
         child: Row(
           children: [
             Expanded(
@@ -634,7 +666,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(label, style: labelStyle),
+        Text(
+          label,
+          style: labelStyle,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+        ),
         const SizedBox(height: 4),
         Text(
           value,
@@ -653,7 +691,15 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     final uptimeValue = uptime != null ? _formatUptime(uptime) : 'N/A';
 
     final cpuLoad = sysInfo?['load'] as List<dynamic>?;
-    final cpuLoadValue = cpuLoad != null ? _formatCpuLoad(cpuLoad) : 'N/A';
+    final glInetData = appState.dashboardData?['glinet'] as GlInetData?;
+    final cpuCores = glInetData?.cpuCores;
+    final cpuLoadValue = cpuLoad != null
+        ? _formatCpuLoad(
+            cpuLoad,
+            cores: cpuCores,
+            showRawLoad: glInetData != null && cpuCores == null,
+          )
+        : 'N/A';
 
     final totalMem = sysInfo?['memory']?['total'] as int? ?? 0;
     final freeMem = sysInfo?['memory']?['free'] as int? ?? 0;
@@ -663,10 +709,66 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         ? '${(usedMem / totalMem * 100).toStringAsFixed(0)}%'
         : 'N/A';
 
+    final cpuTemp = glInetData?.cpuTemperature;
+    final fanActive = glInetData?.fanActive;
+    final fanSpeed = glInetData?.fanSpeed;
+
+    final vitals = <Widget>[
+      Expanded(
+        child: _buildVitalsColumn(
+          context,
+          label: glInetData == null
+              ? context.l10n.cpuLoad
+              : (cpuCores == null ? context.l10n.load : context.l10n.cpu),
+          value: cpuLoadValue,
+        ),
+      ),
+      Expanded(
+        child: _buildVitalsColumn(
+          context,
+          label: context.l10n.memory,
+          value: memoryValue,
+        ),
+      ),
+      Expanded(
+        child: _buildVitalsColumn(
+          context,
+          label: context.l10n.uptime,
+          value: uptimeValue,
+        ),
+      ),
+    ];
+
+    if (cpuTemp != null) {
+      vitals.add(
+        Expanded(
+          child: _buildVitalsColumn(
+            context,
+            label: context.l10n.cpuTemperature,
+            value: '${cpuTemp.toStringAsFixed(1)}\u00B0C',
+          ),
+        ),
+      );
+    }
+
+    if (fanActive != null) {
+      vitals.add(
+        Expanded(
+          child: _buildVitalsColumn(
+            context,
+            label: context.l10n.fan,
+            value: fanActive
+                ? (fanSpeed == null ? context.l10n.on : '$fanSpeed RPM')
+                : context.l10n.off,
+          ),
+        ),
+      );
+    }
+
     return Card(
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-      margin: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 0),
+      margin: EdgeInsets.zero,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 8.0),
         child: Row(
@@ -734,7 +836,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             ),
           ],
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 6),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           mainAxisSize: MainAxisSize.max,
@@ -794,6 +896,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     final wirelessRadios =
         appState.dashboardData?['wireless'] as Map<String, dynamic>?;
     final uciWirelessConfig = appState.dashboardData?['uciWirelessConfig'];
+    final glInetData = appState.dashboardData?['glinet'] as GlInetData?;
 
     // Track which interfaces we've already added from runtime data
     final addedInterfaces = <String>{};
@@ -827,13 +930,20 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             }
 
             final isEnabled = !(config['disabled'] as bool? ?? false);
-            final channel = (iwinfo['channel'] ?? config['channel'] ?? 'N/A')
-                .toString();
+            final glInetRadio = glInetData?.radioForDevice(radioName);
+            final channel =
+                normalizeWifiChannel(iwinfo['channel']) ??
+                normalizeWifiChannel(config['channel']) ??
+                normalizeWifiChannel(glInetRadio?.channel) ??
+                'N/A';
+            final bandStr =
+                glInetRadio?.band ?? config['band']?.toString() ?? '';
+            final bandLabel = formatWifiBand(bandStr);
             final signal = iwinfo['signal'] as int?;
 
             networkCardWidgets.add(
               Card(
-                margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
                 elevation: 2,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(18),
@@ -844,13 +954,13 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                   onLongPress: () {
                     // Navigate to interfaces tab with the specific interface name
                     final appState = ref.read(appStateProvider);
-                    appState.requestTab(2, interfaceToScroll: deviceName);
+                    appState.requestTab(2, interfaceToScroll: uciName);
                   },
                   child: Padding(
-                    padding: const EdgeInsets.all(8.0),
+                    padding: const EdgeInsets.all(6.0),
                     child: _buildWirelessInfoCardContent(
                       context,
-                      ssid: ssid,
+                      ssid: bandLabel.isNotEmpty ? '$ssid ($bandLabel)' : ssid,
                       isEnabled: isEnabled,
                       signal: signal,
                       channel: channel,
@@ -885,7 +995,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         uciInterfaces.forEach((uciName, config) {
           if (!addedInterfaces.contains(uciName)) {
             final ssid = config['ssid'] ?? 'Unnamed';
-            final device = config['device'] ?? '';
+            final device = uciString(config['device']);
             final interfaceId = '$ssid ($device)';
 
             // Check if this interface should be shown based on preferences
@@ -897,10 +1007,15 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             final isRadioEnabled = uciRadios[device]?['disabled'] != '1';
             final isIfaceEnabled = config['disabled'] != '1';
             final isEnabled = isRadioEnabled && isIfaceEnabled;
+            final glInetRadio = glInetData?.radioForDevice(device);
+            final channel = resolveWifiChannel(
+              actual: glInetRadio?.channel,
+              configured: uciRadios[device]?['channel'],
+            );
 
             networkCardWidgets.add(
               Card(
-                margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
                 elevation: 2,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(18),
@@ -911,16 +1026,16 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                   onLongPress: () {
                     // Navigate to interfaces tab with the specific interface name
                     final appState = ref.read(appStateProvider);
-                    appState.requestTab(2, interfaceToScroll: device);
+                    appState.requestTab(2, interfaceToScroll: uciName);
                   },
                   child: Padding(
-                    padding: const EdgeInsets.all(8.0),
+                    padding: const EdgeInsets.all(6.0),
                     child: _buildWirelessInfoCardContent(
                       context,
                       ssid: ssid,
                       isEnabled: isEnabled,
                       signal: null, // No signal for disabled interfaces
-                      channel: config['channel']?.toString() ?? 'N/A',
+                      channel: channel,
                     ),
                   ),
                 ),
@@ -952,7 +1067,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       return Stack(
         children: [
           SizedBox(
-            height: 110, // or whatever height fits the card
+            height: 90,
             child: ListView(
               controller: _wirelessScrollController,
               scrollDirection: Axis.horizontal,
@@ -972,7 +1087,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                       begin: Alignment.centerLeft,
                       end: Alignment.centerRight,
                       colors: [
-                        Colors.transparent,
+                        Theme.of(
+                          context,
+                        ).colorScheme.surface.withValues(alpha: 0),
                         Theme.of(context).colorScheme.surface,
                       ],
                     ),
@@ -1001,7 +1118,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                       begin: Alignment.centerRight,
                       end: Alignment.centerLeft,
                       colors: [
-                        Colors.transparent,
+                        Theme.of(
+                          context,
+                        ).colorScheme.surface.withValues(alpha: 0),
                         Theme.of(context).colorScheme.surface,
                       ],
                     ),
@@ -1115,7 +1234,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
       interfaceCardWidgets.add(
         Card(
-          margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+          margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
           elevation: 2,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(18),
@@ -1130,8 +1249,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             },
             child: Padding(
               padding: const EdgeInsets.symmetric(
-                vertical: 12.0,
-                horizontal: 12.0,
+                vertical: 6.0,
+                horizontal: 8.0,
               ),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -1140,9 +1259,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                   Icon(
                     _getInterfaceIcon(name, proto),
                     color: Theme.of(context).colorScheme.primary,
-                    size: 20,
+                    size: 18,
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 2),
                   Text(
                     name.toUpperCase(),
                     style: Theme.of(context).textTheme.titleSmall?.copyWith(
@@ -1150,11 +1269,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 2),
                   Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 10,
-                      vertical: 4,
+                      vertical: 2,
                     ),
                     decoration: BoxDecoration(
                       color: isUp
@@ -1231,7 +1350,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           return Stack(
             children: [
               SizedBox(
-                height: 110,
+                height: 90,
                 child: ListView(
                   controller: _wanScrollController,
                   scrollDirection: Axis.horizontal,
@@ -1251,7 +1370,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                           begin: Alignment.centerLeft,
                           end: Alignment.centerRight,
                           colors: [
-                            Colors.transparent,
+                            Theme.of(
+                              context,
+                            ).colorScheme.surface.withValues(alpha: 0),
                             Theme.of(context).colorScheme.surface,
                           ],
                         ),
@@ -1280,7 +1401,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                           begin: Alignment.centerRight,
                           end: Alignment.centerLeft,
                           colors: [
-                            Colors.transparent,
+                            Theme.of(
+                              context,
+                            ).colorScheme.surface.withValues(alpha: 0),
                             Theme.of(context).colorScheme.surface,
                           ],
                         ),
@@ -1614,40 +1737,34 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               ),
             );
           } else {
-            // Portrait mode: Fill available height exactly without scrolling
-            return LayoutBuilder(
-              builder: (context, constraints) {
-                return RefreshIndicator(
-                  onRefresh: () => appState.fetchDashboardData(),
-                  child: SingleChildScrollView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    child: SizedBox(
-                      height: constraints.maxHeight,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const SizedBox(height: 16),
-                            _buildDeviceInfoCard(appState),
-                            const SizedBox(height: 12),
-                            Expanded(
-                              child: _buildRealtimeThroughputCard(appState),
-                            ),
-                            const SizedBox(height: 12),
-                            _buildSystemVitalsCard(appState),
-                            const SizedBox(height: 12),
-                            _buildWirelessNetworksCard(appState),
-                            const SizedBox(height: 12),
-                            _buildInterfaceStatusCards(appState),
-                            const SizedBox(height: 12),
-                          ],
-                        ),
-                      ),
+            // Portrait mode: keep the complete dashboard on one screen.
+            return RefreshIndicator(
+              onRefresh: () => appState.fetchDashboardData(),
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                child: SizedBox(
+                  height: constraints.maxHeight,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const SizedBox(height: 4),
+                        _buildDeviceInfoCard(appState),
+                        const SizedBox(height: 4),
+                        Expanded(child: _buildRealtimeThroughputCard(appState)),
+                        const SizedBox(height: 4),
+                        _buildSystemVitalsCard(appState),
+                        const SizedBox(height: 4),
+                        _buildWirelessNetworksCard(appState),
+                        const SizedBox(height: 4),
+                        _buildInterfaceStatusCards(appState),
+                        const SizedBox(height: 4),
+                      ],
                     ),
                   ),
-                );
-              },
+                ),
+              ),
             );
           }
         },

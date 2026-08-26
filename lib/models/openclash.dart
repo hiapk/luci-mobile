@@ -184,10 +184,9 @@ class OpenClashNodeHealth {
       }
     }
     return OpenClashNodeHealth(
-      score: (latencyScore * 0.5 +
-              stabilityScore * 0.3 +
-              successRateScore * 0.2)
-          .round(),
+      score:
+          (latencyScore * 0.5 + stabilityScore * 0.3 + successRateScore * 0.2)
+              .round(),
       lastTestTime: lastTestTime,
     );
   }
@@ -210,7 +209,8 @@ class OpenClashNodeHealth {
     if (latencies.length == 1) return 50;
     final average =
         latencies.reduce((left, right) => left + right) / latencies.length;
-    final variance = latencies
+    final variance =
+        latencies
             .map((latency) => math.pow(latency - average, 2))
             .reduce((left, right) => left + right) /
         latencies.length;

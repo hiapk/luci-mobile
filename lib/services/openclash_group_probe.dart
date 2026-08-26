@@ -1,6 +1,5 @@
-typedef OpenClashGroupProbe = Future<Map<String, dynamic>> Function(
-  String group,
-);
+typedef OpenClashGroupProbe =
+    Future<Map<String, dynamic>> Function(String group);
 
 Future<Map<String, Map<String, dynamic>>> testOpenClashGroupsSequentially(
   Iterable<String> groups,

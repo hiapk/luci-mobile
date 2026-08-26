@@ -11,28 +11,28 @@ class SettingsScreen extends ConsumerWidget {
 
   void _showReviewerModeResetDialog(BuildContext context, WidgetRef ref) {
     final appState = ref.read(appStateProvider);
+    // Capture the root navigator before any awaits: the dialog's context is
+    // dead once popped, so a later context.mounted check would skip the
+    // navigation and leave the user on a stale screen.
+    final navigator = Navigator.of(context);
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text('退出演示模式？'),
         content: const Text('退出后将恢复正常身份验证，需要使用真实路由器凭据登录。'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: () => Navigator.of(dialogContext).pop(),
             child: const Text('取消'),
           ),
           FilledButton(
             onPressed: () async {
-              Navigator.of(context).pop();
+              Navigator.of(dialogContext).pop();
               await appState.setReviewerMode(false);
-              appState.logout();
-              if (context.mounted) {
-                unawaited(
-                  Navigator.of(
-                    context,
-                  ).pushNamedAndRemoveUntil('/login', (route) => false),
-                );
-              }
+              await appState.logout();
+              unawaited(
+                navigator.pushNamedAndRemoveUntil('/login', (route) => false),
+              );
             },
             child: const Text('退出'),
           ),

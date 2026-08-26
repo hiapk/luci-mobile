@@ -43,8 +43,8 @@ class _LuciMenuScreenState extends ConsumerState<LuciMenuScreen> {
       return Future.error(const LuciMenuException('当前没有可用的 LuCI 登录会话。'));
     }
     return _menuService.fetchMenu(
-      host: router.ipAddress,
-      useHttps: router.useHttps,
+      host: router.activeAddress,
+      useHttps: router.activeUseHttps,
       cookieName: cookieName,
       token: token,
       context: context,
@@ -163,8 +163,8 @@ class _LuciMenuScreenState extends ConsumerState<LuciMenuScreen> {
     if (router == null || token == null || cookieName == null) return;
 
     final uri = LuciMenuService.routerUri(
-      host: router.ipAddress,
-      useHttps: router.useHttps,
+      host: router.activeAddress,
+      useHttps: router.activeUseHttps,
       pathSegments: ['cgi-bin', 'luci', ...item.pathSegments],
     );
     await Navigator.of(context).push(
