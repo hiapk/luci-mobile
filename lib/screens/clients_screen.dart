@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:luci_mobile/models/client.dart';
 import 'package:luci_mobile/main.dart';
 import 'package:luci_mobile/services/client_list_policy.dart';
+import 'package:luci_mobile/services/secure_storage_service.dart';
 import 'package:luci_mobile/widgets/luci_app_bar.dart';
 import 'package:luci_mobile/design/luci_design_system.dart';
 import 'package:luci_mobile/widgets/luci_loading_states.dart';
@@ -20,6 +23,8 @@ class ClientsScreen extends ConsumerStatefulWidget {
 
 class _ClientsScreenState extends ConsumerState<ClientsScreen> {
   String _searchQuery = '';
+  final SecureStorageService _secureStorage = SecureStorageService();
+  Map<String, String> _clientAliases = {};
   // Track expansion by client identity (MAC/IP), not list index - indices
   // shift when the search filter or the underlying data reorders the list.
   final Set<String> _expandedClientKeys = {};
@@ -41,6 +46,89 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen> {
     final initState = ref.read(appStateProvider);
     _lastSelectedRouterId = initState.selectedRouter?.id;
     _computeClientsFuture();
+    unawaited(_loadClientAliases());
+  }
+
+  Future<void> _loadClientAliases() async {
+    final aliases = await _secureStorage.getClientAliases();
+    if (!mounted) return;
+    setState(() => _clientAliases = aliases);
+  }
+
+  String? _clientAlias(Client client) =>
+      _clientAliases[SecureStorageService.normalizeClientMac(
+        client.macAddress,
+      )];
+
+  String _clientDisplayName(Client client) =>
+      _clientAlias(client) ?? client.hostname;
+
+  bool _canEditAlias(Client client) {
+    final mac = SecureStorageService.normalizeClientMac(client.macAddress);
+    return mac.isNotEmpty && mac != 'N/A';
+  }
+
+  Future<void> _editClientAlias(Client client) async {
+    final currentAlias = _clientAlias(client);
+    final controller = TextEditingController(text: currentAlias ?? '');
+    final alias = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('设备别名'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: 32,
+          textInputAction: TextInputAction.done,
+          decoration: InputDecoration(
+            labelText: '本地别名',
+            hintText: client.hostname,
+            helperText: '仅保存在当前手机',
+            border: const OutlineInputBorder(),
+          ),
+          onSubmitted: (value) => Navigator.of(dialogContext).pop(value),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('取消'),
+          ),
+          if (currentAlias != null)
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(''),
+              child: const Text('删除别名'),
+            ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(controller.text),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (alias == null) return;
+
+    try {
+      await _secureStorage.setClientAlias(
+        macAddress: client.macAddress,
+        alias: alias,
+      );
+      if (!mounted) return;
+      final mac = SecureStorageService.normalizeClientMac(client.macAddress);
+      final normalizedAlias = alias.trim();
+      setState(() {
+        if (normalizedAlias.isEmpty) {
+          _clientAliases.remove(mac);
+        } else {
+          _clientAliases[mac] = normalizedAlias;
+        }
+      });
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('保存别名失败：$error')));
+    }
   }
 
   void _computeClientsFuture() {
@@ -52,11 +140,12 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen> {
   }
 
   Future<void> _disconnectClient(Client client) async {
+    final displayName = _clientDisplayName(client);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('断开无线设备'),
-        content: Text('确定断开 ${client.hostname} 吗？设备将在 1 分钟内无法重新连接。'),
+        content: Text('确定断开 $displayName 吗？设备将在 1 分钟内无法重新连接。'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
@@ -78,7 +167,7 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('已断开 ${client.hostname}')));
+      ).showSnackBar(SnackBar(content: Text('已断开 $displayName')));
       setState(_computeClientsFuture);
     } catch (error) {
       if (!mounted) return;
@@ -183,7 +272,11 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen> {
 
                     final filteredClients = clients.where((client) {
                       final query = _searchQuery.toLowerCase();
-                      return client.hostname.toLowerCase().contains(query) ||
+                      return (_clientAlias(
+                                client,
+                              )?.toLowerCase().contains(query) ??
+                              false) ||
+                          client.hostname.toLowerCase().contains(query) ||
                           client.ipAddress.toLowerCase().contains(query) ||
                           client.macAddress.toLowerCase().contains(query) ||
                           (client.vendor != null &&
@@ -268,7 +361,11 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen> {
                                         ),
                                         child: _UnifiedClientCard(
                                           client: client,
+                                          alias: _clientAlias(client),
                                           isExpanded: isExpanded,
+                                          onEditAlias: _canEditAlias(client)
+                                              ? () => _editClientAlias(client)
+                                              : null,
                                           onDisconnect:
                                               client.connectionType ==
                                                   ConnectionType.wireless
@@ -310,14 +407,18 @@ class _ClientsScreenState extends ConsumerState<ClientsScreen> {
 
 class _UnifiedClientCard extends StatefulWidget {
   final Client client;
+  final String? alias;
   final bool isExpanded;
   final VoidCallback onTap;
+  final VoidCallback? onEditAlias;
   final Future<void> Function()? onDisconnect;
 
   const _UnifiedClientCard({
     required this.client,
+    required this.alias,
     required this.isExpanded,
     required this.onTap,
+    this.onEditAlias,
     this.onDisconnect,
   });
 
@@ -329,6 +430,8 @@ class _UnifiedClientCardState extends State<_UnifiedClientCard>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   bool _disconnecting = false;
+
+  String get _displayName => widget.alias ?? widget.client.hostname;
 
   @override
   void initState() {
@@ -450,9 +553,9 @@ class _UnifiedClientCardState extends State<_UnifiedClientCard>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            widget.client.hostname,
+                            _displayName,
                             style: LuciTextStyles.cardTitle(context),
-                            semanticsLabel: '设备主机名：${widget.client.hostname}',
+                            semanticsLabel: '设备名称：$_displayName',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -616,6 +719,21 @@ class _UnifiedClientCardState extends State<_UnifiedClientCard>
       ),
       child: Column(
         children: [
+          if (widget.onEditAlias != null)
+            ListTile(
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+              dense: true,
+              title: const Text('本地别名'),
+              subtitle: Text(widget.alias ?? '未设置'),
+              trailing: const Icon(Icons.edit_outlined, size: 20),
+              onTap: widget.onEditAlias,
+            ),
+          if (widget.alias != null)
+            detailRow(
+              '原始名称',
+              client.hostname,
+              semanticsLabel: '原始名称：${client.hostname}',
+            ),
           detailRow(
             'IP 地址',
             client.ipAddress,

@@ -10,6 +10,7 @@ class SecureStorageService {
 
   static const String _routersKey = 'routers';
   static const String _selectedRouterKey = 'selectedRouterId';
+  static const String _clientAliasesKey = 'clientAliases';
   static const String _luciSessionPrefix = 'luciSession:';
   static const String _totpSecretPrefix = 'luciTotpSecret:';
   static const String _totpMarkerPrefix = 'luciTotpConfigured:';
@@ -319,6 +320,52 @@ class SecureStorageService {
     } catch (e, stack) {
       Logger.exception('Failed to delete value for key: $key', e, stack);
       rethrow;
+    }
+  }
+
+  static String normalizeClientMac(String macAddress) =>
+      macAddress.trim().toUpperCase().replaceAll('-', ':');
+
+  Future<Map<String, String>> getClientAliases() async {
+    try {
+      final encoded = await _storage.read(key: _clientAliasesKey);
+      if (encoded == null || encoded.isEmpty) return {};
+      final decoded = jsonDecode(encoded);
+      if (decoded is! Map) return {};
+
+      final aliases = <String, String>{};
+      for (final entry in decoded.entries) {
+        if (entry.value is! String) continue;
+        final mac = normalizeClientMac(entry.key.toString());
+        final alias = (entry.value as String).trim();
+        if (mac.isNotEmpty && alias.isNotEmpty) aliases[mac] = alias;
+      }
+      return aliases;
+    } catch (error, stack) {
+      Logger.exception('Failed to get client aliases', error, stack);
+      return {};
+    }
+  }
+
+  Future<void> setClientAlias({
+    required String macAddress,
+    required String alias,
+  }) async {
+    final mac = normalizeClientMac(macAddress);
+    if (mac.isEmpty) return;
+
+    final aliases = await getClientAliases();
+    final normalizedAlias = alias.trim();
+    if (normalizedAlias.isEmpty) {
+      aliases.remove(mac);
+    } else {
+      aliases[mac] = normalizedAlias;
+    }
+
+    if (aliases.isEmpty) {
+      await _storage.delete(key: _clientAliasesKey);
+    } else {
+      await _storage.write(key: _clientAliasesKey, value: jsonEncode(aliases));
     }
   }
 
