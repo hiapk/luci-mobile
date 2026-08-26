@@ -770,16 +770,12 @@ class AppState extends ChangeNotifier {
     var port = 8123;
     try {
       final results = await Future.wait([
-        _execFile(
-          '/usr/libexec/istorec/homeassistant.sh',
-          const ['status'],
-          context: context?.mounted == true ? context : null,
-        ),
-        _execFile(
-          '/usr/libexec/istorec/homeassistant.sh',
-          const ['port'],
-          context: context?.mounted == true ? context : null,
-        ),
+        _execFile('/usr/libexec/istorec/homeassistant.sh', const [
+          'status',
+        ], context: context?.mounted == true ? context : null),
+        _execFile('/usr/libexec/istorec/homeassistant.sh', const [
+          'port',
+        ], context: context?.mounted == true ? context : null),
       ]);
       status = results[0]['stdout']?.toString().trim() ?? '';
       port =
@@ -858,11 +854,9 @@ class AppState extends ChangeNotifier {
       _execDirect('/usr/libexec/package-manager-call', const [
         'list-available',
       ], context: context),
-      _execDirect(
-        '/usr/libexec/package-manager-call',
-        const ['list-installed'],
-        context: context?.mounted == true ? context : null,
-      ),
+      _execDirect('/usr/libexec/package-manager-call', const [
+        'list-installed',
+      ], context: context?.mounted == true ? context : null),
     ]);
     final packages = <String, RouterPackageInfo>{};
     for (final item in parsePackageControlRecords(outputs[0])) {
